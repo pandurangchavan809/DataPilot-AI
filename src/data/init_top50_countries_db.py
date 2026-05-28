@@ -349,7 +349,7 @@ def initialize_top50_db() -> None:
             EDUCATION_STATS,
         )
         cursor.executemany(
-            "INSERT OR REPLACE INTO tourism_stats VALUES (?, ?, ?, ?, ?);",
+            "INSERT OR REPLACE INTO tourism_stats VALUES (?, ?, ?, ?);",
             TOURISM_STATS,
         )
         cursor.executemany(
