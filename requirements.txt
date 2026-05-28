@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+streamlit
+sqlalchemy
+sqlmodel
+pymysql
+requests
+python-dotenv
+langchain
+google-cloud-aiplatform
