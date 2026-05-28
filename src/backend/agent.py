@@ -6,10 +6,19 @@ from .config import settings
 from .db import inspect_schema
 
 
-genai.configure(api_key=settings.gemini_api_key)
+genai.configure(
+    api_key=settings.gemini_api_key
+)
 
 
-def build_prompt(schema_text: str, user_query: str) -> str:
+def build_prompt(
+    schema_text: str,
+    user_query: str
+) -> str:
+    """
+    Build schema-aware SQL generation prompt.
+    """
+
     return f"""
 You are an expert SQL query generator.
 
@@ -17,32 +26,47 @@ DATABASE SCHEMA:
 {schema_text}
 
 TASK:
-Convert the user request into valid SQLite SQL.
+Convert the user request into valid SQL.
 
 RULES:
-- Return ONLY SQL
+- Return ONLY raw SQL
 - No markdown
 - No explanation
 - No comments
-- Use valid SQLite syntax
+- Use correct table names
+- Use correct column names
+- Generate optimized SQL
 
 USER QUERY:
 {user_query}
 """
 
 
-def generate_sql_from_prompt(engine, natural_language: str) -> dict:
+def generate_sql_from_prompt(
+    engine,
+    natural_language: str
+) -> dict:
+    """
+    Generate SQL query from natural language.
+    """
+
     try:
+
         schema = inspect_schema(engine)
 
         schema_text = ""
 
         for table, columns in schema.items():
-            column_names = ", ".join(
-                [column["name"] for column in columns]
-            )
 
-            schema_text += f"\nTable {table}: {column_names}"
+            column_names = [
+                col["name"]
+                for col in columns
+            ]
+
+            schema_text += (
+                f"Table {table}: "
+                f"{', '.join(column_names)}\n"
+            )
 
         prompt = build_prompt(
             schema_text,
@@ -53,7 +77,9 @@ def generate_sql_from_prompt(engine, natural_language: str) -> dict:
             settings.gemini_model_name
         )
 
-        response = model.generate_content(prompt)
+        response = model.generate_content(
+            prompt
+        )
 
         sql_query = response.text.strip()
 
@@ -69,6 +95,7 @@ def generate_sql_from_prompt(engine, natural_language: str) -> dict:
         }
 
     except Exception as exc:
+
         raise RuntimeError(
             f"Failed to generate SQL: {str(exc)}"
         )
