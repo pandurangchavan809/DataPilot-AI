@@ -44,6 +44,7 @@ def inspect_schema(engine: Engine) -> dict:
                 {"name": column["name"], "type": str(column["type"])} for column in columns
             ]
         return schema
+        
     except Exception as exc:
         raise RuntimeError(f"Failed to inspect schema: {str(exc)}")
 

@@ -11,3 +11,9 @@ venv/
 .vscode/
 node_modules/
 *.log
+.venv/
+dist/
+backend/.env
+frontend/.env
+!.env.example
+.pytest_cache/

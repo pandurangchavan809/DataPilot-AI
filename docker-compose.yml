@@ -1,0 +1,26 @@
+# Production-like stack: nginx (frontend + /api proxy) -> gunicorn (Flask) -> Redis.
+# Usage: cp backend/.env.example backend/.env  (fill in keys)  &&  docker compose up --build
+services:
+  backend:
+    build: ./backend
+    env_file: backend/.env
+    environment:
+      APP_ENV: production
+      SESSION_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379/1
+      PROXY_FIX_HOPS: "1"
+      CORS_ORIGINS: http://localhost:8080
+    depends_on: [redis]
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports: ["8080:80"]
+    depends_on: [backend]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped

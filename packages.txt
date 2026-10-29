@@ -1,0 +1,2 @@
+default-libmysqlclient-dev
+build-essential

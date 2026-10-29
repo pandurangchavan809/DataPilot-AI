@@ -1,0 +1,14 @@
+flask>=3.0,<4
+flask-cors>=5.0
+flask-limiter>=3.8
+pydantic>=2.7,<3
+pydantic-settings>=2.7
+python-dotenv>=1.0
+openai>=1.50
+sqlalchemy>=2.0.30,<2.1
+sqlglot>=25
+psycopg[binary]>=3.2
+pymysql>=1.1
+cryptography>=42
+redis>=5.0
+gunicorn>=22; platform_system != "Windows"

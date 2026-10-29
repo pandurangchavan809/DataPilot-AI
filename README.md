@@ -1,79 +1,157 @@
 # DataPilot AI
 
-An AI-powered Natural Language to SQL assistant for relational databases.
+**Agentic natural-language analytics over your SQL database: read-only by design.**
 
-## Overview
+Ask questions in plain English. A team of agents plans, writes, verifies and runs SQL against your
+PostgreSQL, MySQL or the bundled demo database. It then explains the results, and draws a chart
+when you ask for one. Everything streams live into a ChatGPT-style interface.
 
-DataPilot AI lets users query external MySQL databases or a built-in SQLite demo dataset using plain English. The platform includes:
+---
 
-- Streamlit frontend for conversational query input
-- FastAPI backend for schema extraction, SQL generation, execution, and error correction
-- LangChain SQL agent with Gemini/Vertex AI integration
-- Demo SQLite database for easy testing and evaluation
+## Architecture
 
-## Features
-
-- Natural Language to SQL conversion
-- Dynamic database connection via credentials
-- Automatic schema discovery
-- Context-aware SQL generation
-- Query execution and results display
-- Automated SQL correction for failed execution
-- Built-in SQLite demo dataset
-
-## Folder structure
-
-- `src/backend/` – FastAPI application, database utilities, AI agent orchestration
-- `src/frontend/` – Streamlit UI
-- `src/data/` – demo database initialization and schema files
-- `src/data/init_top50_countries_db.py` – generates a Top 50 Countries SQLite dataset
-- `src/data/top50_countries_schema.sql` – schema definition for the dataset
-
-## Getting Started
-
-Recommended workflow:
-
-1. Create a virtual environment.
-2. Activate the environment.
-3. Install dependencies.
-4. Create a `.env` file with `GEMINI_API_KEY` and `GEMINI_MODEL_NAME`.
-5. Initialize the demo SQLite database.
-6. Start the FastAPI backend.
-7. Start the Streamlit frontend.
-
-### Commands
-
-```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-rem edit .env and add your GEMINI_API_KEY
-python src/data/init_demo_db.py
-uvicorn src.backend.main:app --host 0.0.0.0 --port 8000 --reload
-streamlit run src/frontend/app.py
+```
+┌──────────────────────────┐        ┌──────────────────────────────────────────────────────────┐
+│ React + TS + Tailwind    │  SSE   │ Flask API (gunicorn gthread)                              │
+│  chat · agent trace      │◀──────▶│                                                          │
+│  tables · charts · SQL   │  JSON  │  Orchestrator ── Router ─┬─ write    → refusal           │
+└──────────────────────────┘        │   (state machine)        ├─ general  → answer            │
+                                    │                          └─ data → Schema agent          │
+                                    │                                   → SQL agent ◀─┐ repair │
+                                    │                                   → Guard  ─────┤ loop   │
+                                    │                                   → Executor ───┘        │
+                                    │                                   → Viz agent (spec)     │
+                                    │                                   → Insight agent (stream)│
+                                    │  LLM Gateway: roles · fallback · <think> stripping       │
+                                    │  Session store (memory/Redis, Fernet-encrypted creds)    │
+                                    └───────────────┬──────────────────────────────────────────┘
+                                                    │ read-only connections
+                                       SQLite demo · PostgreSQL · MySQL
 ```
 
-### Deploy to Streamlit Cloud
+### Agents
 
-1. Push the repo to GitHub.
-2. Connect the repo in Streamlit Cloud.
-3. Add `GEMINI_API_KEY` and `GEMINI_MODEL_NAME` as Streamlit secrets.
-4. Set the main file to `src/frontend/app.py`.
-5. If using a backend, deploy the FastAPI service separately and point the frontend to it.
+| Agent | Model role | Responsibility |
+|---|---|---|
+| Router | `fast` | Intent (data / schema / general / write), chart detection, rewrites follow-ups into standalone questions |
+| Schema | `fast` | Picks relevant tables for large schemas (full schema if ≤ `SCHEMA_FULL_CONTEXT_MAX_TABLES`), adds FK-linked tables, samples rows |
+| SQL | `reasoning` | Writes dialect-specific SQL; on guard/DB errors repairs its own query (`MAX_SQL_RETRIES`) |
+| Guard | none (deterministic) | Gets the final say on safety; never trusts LLM output |
+| Viz | `fast` | Returns a declarative chart spec (`type, x, y`), validated against result columns, with a heuristic fallback |
+| Insight | `fast` | Streams a grounded Markdown answer from the actual rows |
 
-## Environment
+### Read-only, enforced three ways
 
-Create a `.env` file with your Gemini API key and the model name you want to use.
+1. **SQL guard** (`sqlglot` AST): exactly one statement, must be a query, no DML/DDL/admin nodes, no
+   dangerous functions (`pg_sleep`, `load_extension`, `sleep`…), no `SELECT INTO`/`FOR UPDATE`, auto `LIMIT`.
+2. **Database session**: SQLite `mode=ro` + `query_only`, PostgreSQL `default_transaction_read_only`,
+   MySQL `SET SESSION TRANSACTION READ ONLY`, plus per-dialect statement timeouts.
+3. **Transaction**: every execution runs in a transaction that is always rolled back.
+
+### Multi-model, configured in `.env`
+
+Every provider speaks the OpenAI Chat Completions protocol (Nebius Token Factory, Gemini, OpenAI…).
+Models are referenced as `provider:model` and assigned to roles:
 
 ```env
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL_NAME=gemini-2.5-flash
+LLM_PRIMARY=nebius:nvidia/Llama-3_3-Nemotron-Super-49B-v1_5
+LLM_SECONDARY=gemini:gemini-2.5-flash      # automatic fallback
+LLM_REASONING=nebius:nvidia/Llama-3_3-Nemotron-Super-49B-v1_5
+LLM_FAST=gemini:gemini-2.5-flash
+LLM_AVAILABLE_MODELS=...                   # what users can pick in the UI
 ```
 
-> Use `GEMINI_API_KEY` for Gemini key-based auth instead of service account credentials.
+Providers without an API key are disabled automatically. Users can choose **Auto** (role-based
+routing) or pin a single model from the header. To add a new provider, append it to `LLM_PROVIDERS`
+and set `<NAME>_API_KEY` / `<NAME>_BASE_URL`.
 
-## Notes
+### Sessions
 
-- `src/data/init_demo_db.py` creates `data/demo.db`.
-- Use built-in demo mode or connect to a MySQL database with credentials.
+There are no accounts and no stored chats. Chat history lives in the browser tab (`sessionStorage`) and
+the last turns are sent with each request for follow-up context. Connection credentials are
+Fernet-encrypted in the session store (memory, or Redis for multi-worker deployments) and expire after
+`SESSION_TTL_MINUTES`.
+
+---
+
+## Quick start (local)
+
+**Backend** (Python 3.11+)
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env               # add at least one provider API key + SECRET_KEY
+python wsgi.py                     # http://localhost:5000  (demo DB is created on first start)
+```
+
+**Frontend** (Node 20+)
+
+```bash
+cd frontend
+npm install
+npm run dev                        # http://localhost:5173  (proxies /api to :5000)
+```
+
+Open the app and click **Try the demo database**.
+
+## Production (Docker)
+
+```bash
+cp backend/.env.example backend/.env   # fill in keys + a strong SECRET_KEY
+docker compose up --build              # http://localhost:8080
+```
+
+nginx serves the built SPA and proxies `/api` (SSE-safe, unbuffered) to gunicorn. Redis backs
+sessions and rate limits, so you can scale the backend horizontally.
+
+## API
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/health` | Liveness + whether any LLM is configured |
+| GET | `/api/config` | Models, roles, enabled DB types, limits (client bootstrap) |
+| POST | `/api/connections` | Connect (`sqlite_demo`, `postgresql`, `mysql`) |
+| GET / DELETE | `/api/connections/current` | Current connection + schema / disconnect |
+| POST | `/api/schema/refresh` | Re-introspect the schema |
+| POST | `/api/chat` | Run the agents. Streams SSE events: `step`, `sql`, `result`, `chart`, `token`, `model`, `error`, `done` |
+
+All session-scoped endpoints require an `X-Session-Id` header (generated by the frontend).
+
+## Tests
+
+```bash
+cd backend && pytest -q
+```
+
+Covers the SQL guard (allow/deny matrix across dialects), DB-level read-only enforcement, the
+connection lifecycle API, and LLM output parsing (`<think>` stripping, JSON/SQL extraction).
+
+## Project layout
+
+```
+backend/
+  app/
+    agents/     orchestrator, router, schema, sql, viz, insight, prompts
+    llm/        provider registry + gateway (fallback, streaming)
+    db/         connectors, guard, executor, introspection, session store, manager
+    api/        Flask blueprints (meta, connections, chat)
+    core/       errors, logging, serialization
+  scripts/seed_demo.py   demo dataset
+  tests/
+frontend/
+  src/
+    components/  chat/, sidebar/, connection/, ui/
+    hooks/       useChat (SSE streaming), useConnection
+    store/       zustand (session-scoped)
+    lib/         api client, formatting
+```
+
+## Roadmap
+
+- **v2: Data ingestion.** Upload CSV/Excel, infer types, clean and load into a per-user
+  workspace database. This becomes another connection type next to `sqlite_demo`, so the agents
+  need no changes.
+- Query result caching, saved charts, and SQL Server / Snowflake connectors.

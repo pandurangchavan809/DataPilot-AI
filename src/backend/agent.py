@@ -18,7 +18,6 @@ def build_prompt(
     """
     Build schema-aware SQL generation prompt.
     """
-
     return f"""
 You are an expert SQL query generator.
 

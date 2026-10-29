@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-accent-500: #06b6d4;
+
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-blink: blink 1s steps(2, start) infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes shimmer {
+    from { background-position: -200% 0; }
+    to { background-position: 200% 0; }
+  }
+  @keyframes blink {
+    to { visibility: hidden; }
+  }
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection { @apply bg-brand-500/25; }
+  * { scrollbar-width: thin; scrollbar-color: rgb(161 161 170 / 0.35) transparent; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(120deg, var(--color-brand-500), var(--color-accent-500));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility shimmer-text {
+  background-image: linear-gradient(90deg, currentColor 0%, currentColor 40%, rgb(161 161 170 / 0.5) 50%, currentColor 60%, currentColor 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+/* Markdown answers */
+.markdown { @apply text-[15px] leading-7 text-zinc-800 dark:text-zinc-200; }
+.markdown > * + * { @apply mt-3; }
+.markdown p { @apply leading-7; }
+.markdown strong { @apply font-semibold text-zinc-900 dark:text-white; }
+.markdown ul { @apply list-disc space-y-1 pl-5 marker:text-zinc-400; }
+.markdown ol { @apply list-decimal space-y-1 pl-5 marker:text-zinc-400; }
+.markdown h1, .markdown h2, .markdown h3 { @apply mt-5 font-semibold text-zinc-900 dark:text-white; }
+.markdown h1 { @apply text-xl; }
+.markdown h2 { @apply text-lg; }
+.markdown h3 { @apply text-base; }
+.markdown a { @apply text-brand-600 underline underline-offset-2 dark:text-brand-400; }
+.markdown code { @apply rounded-md bg-zinc-100 px-1.5 py-0.5 font-mono text-[13px] dark:bg-zinc-800; }
+.markdown pre { @apply overflow-x-auto rounded-xl bg-zinc-100 p-4 dark:bg-zinc-900; }
+.markdown pre code { @apply bg-transparent p-0; }
+.markdown table { @apply w-full border-collapse text-sm; }
+.markdown th, .markdown td { @apply border border-zinc-200 px-3 py-1.5 text-left dark:border-zinc-800; }
+.markdown blockquote { @apply border-l-2 border-brand-500 pl-4 text-zinc-600 dark:text-zinc-400; }
+
+/* Chart tokens: validated categorical palette, stepped separately for each mode */
+:root {
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --chart-grid: #e7e7e4; --chart-axis: #52514e; --chart-surface: #ffffff;
+}
+.dark {
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  --chart-grid: #2a2a28; --chart-axis: #c3c2b7; --chart-surface: #09090b;
+}
