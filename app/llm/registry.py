@@ -2,7 +2,7 @@
 
 All providers speak the OpenAI Chat Completions protocol, so one SDK client
 per provider is enough. Add a provider by listing it in LLM_PROVIDERS and
-setting <NAME>_API_KEY / <NAME>_BASE_URL.
+setting <NAME>_API_KEY, <NAME>_MODELS and <NAME>_BASE_URL.
 """
 
 from __future__ import annotations
@@ -82,8 +82,10 @@ class ProviderRegistry:
         }
 
     def available_models(self) -> list[ModelRef]:
-        refs = [ModelRef.parse(ref) for ref in self._settings.llm_available_models]
-        refs.extend(self.roles().values())
+        """Role models first, then each provider's <NAME>_MODELS list."""
+        refs = list(self.roles().values())
+        for provider in self._clients:
+            refs.extend(ModelRef(provider, name) for name in self._settings.provider_models(provider))
         seen: dict[str, ModelRef] = {}
         for ref in refs:
             if self.is_enabled(ref) and ref.id not in seen:

@@ -2,9 +2,8 @@ import { ChevronLeft, ChevronRight, Download, Table2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { cn } from "@/lib/cn";
-import { downloadText, formatCell, formatDuration, toCsv } from "@/lib/format";
-import type { QueryResult } from "@/types/api";
+import { cn, downloadText, formatCell, formatDuration, toCsv } from "@/utils";
+import type { QueryResult } from "@/types";
 
 const PAGE_SIZE = 10;
 

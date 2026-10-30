@@ -1,12 +1,12 @@
 import { AlertCircle, Database, Loader2, ShieldCheck, Sparkles } from "lucide-react";
-import { useEffect, useState, type ChangeEvent, type FormEvent, type InputHTMLAttributes } from "react";
+import { type ChangeEvent, type FormEvent, type InputHTMLAttributes, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { useConnection } from "@/hooks/useConnection";
-import { cn } from "@/lib/cn";
-import { useApp } from "@/store/app";
-import type { DbType } from "@/types/api";
+import { cn } from "@/utils";
+import { useApp } from "@/hooks/useApp";
+import type { DbType } from "@/types";
 
 const TABS: { type: DbType; label: string; port?: number }[] = [
   { type: "sqlite_demo", label: "Demo" },

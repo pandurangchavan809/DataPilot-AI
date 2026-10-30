@@ -1,19 +1,33 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-env/
-venv/
+# --- Secrets (never commit) ---
 .env
-*.db
-.DS_Store
-.idea/
-.vscode/
-node_modules/
-*.log
-.venv/
-dist/
-backend/.env
-frontend/.env
+.env.*
 !.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# --- Local data (demo.db is re-created on start) ---
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
 .pytest_cache/
+
+# --- Frontend ---
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- Editors / OS / logs ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

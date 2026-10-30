@@ -1,8 +1,8 @@
 import { ChevronRight, Eye, KeyRound, Link2, Search, Table2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { cn } from "@/lib/cn";
-import { useApp } from "@/store/app";
+import { cn } from "@/utils";
+import { useApp } from "@/hooks/useApp";
 
 export function SchemaExplorer() {
   const schema = useApp((s) => s.connection.schema);

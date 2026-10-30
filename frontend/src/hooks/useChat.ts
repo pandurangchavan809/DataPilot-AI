@@ -1,10 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 
-import { ApiError, streamChat } from "@/lib/api";
-import { uid } from "@/lib/format";
-import { useApp } from "@/store/app";
-import type { AgentStep, ChartSpec, QueryResult } from "@/types/api";
-import type { AssistantMessage } from "@/types/chat";
+import { ApiError, streamChat } from "@/api";
+import { uid } from "@/utils";
+import { useApp } from "@/hooks/useApp";
+import type { AgentStep, AssistantMessage, ChartSpec, QueryResult } from "@/types";
 
 const HISTORY_MESSAGES = 12;
 

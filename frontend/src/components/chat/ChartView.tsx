@@ -1,29 +1,9 @@
 import { AreaChart as AreaIcon, BarChart3, LineChart as LineIcon, PieChart as PieIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-  type TooltipProps,
-} from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, type TooltipProps, XAxis, YAxis } from "recharts";
 
-import { cn } from "@/lib/cn";
-import { formatCell, formatCompact } from "@/lib/format";
-import type { ChartSpec, ChartType, QueryResult } from "@/types/api";
+import { cn, formatCell, formatCompact } from "@/utils";
+import type { ChartSpec, ChartType, QueryResult } from "@/types";
 
 // Fixed order, never cycled: identity follows the series, not its rank.
 const SERIES = Array.from({ length: 8 }, (_, i) => `var(--series-${i + 1})`);

@@ -1,8 +1,8 @@
 import { ArrowUp, Lock, Square } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { cn } from "@/lib/cn";
-import { useApp } from "@/store/app";
+import { cn } from "@/utils";
+import { useApp } from "@/hooks/useApp";
 
 interface ComposerProps {
   busy: boolean;

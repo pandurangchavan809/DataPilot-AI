@@ -1,24 +1,8 @@
-import {
-  BarChart3,
-  Check,
-  ChevronDown,
-  CircleSlash,
-  Code2,
-  Compass,
-  Database,
-  Loader2,
-  MessageSquare,
-  Play,
-  ShieldCheck,
-  Sparkles,
-  TriangleAlert,
-} from "lucide-react";
-import { useState, type ComponentType } from "react";
+import { BarChart3, Check, ChevronDown, CircleSlash, Code2, Compass, Database, Loader2, MessageSquare, Play, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { type ComponentType, useState } from "react";
 
-import { cn } from "@/lib/cn";
-import { formatDuration } from "@/lib/format";
-import type { AgentStep } from "@/types/api";
-import type { AssistantStatus } from "@/types/chat";
+import { cn, formatDuration } from "@/utils";
+import type { AgentStep, AssistantStatus } from "@/types";
 
 const KIND_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   route: Compass,

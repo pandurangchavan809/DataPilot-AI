@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Logo } from "@/components/ui/Logo";
 import { useConnection } from "@/hooks/useConnection";
-import { cn } from "@/lib/cn";
-import { useApp } from "@/store/app";
+import { cn } from "@/utils";
+import { useApp } from "@/hooks/useApp";
 
 import { SchemaExplorer } from "./SchemaExplorer";
 

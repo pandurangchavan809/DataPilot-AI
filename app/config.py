@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-ENV_FILE = BACKEND_DIR / ".env"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT_DIR / ".env"
 
 CsvList = Annotated[list[str], NoDecode]
 
@@ -38,16 +38,16 @@ class Settings(BaseSettings):
     cors_origins: CsvList = ["http://localhost:5173"]
 
     # --- LLM providers (OpenAI-compatible) -----------------------------------
-    # Each name N in this list is configured via N_API_KEY and N_BASE_URL.
+    # Each name N in this list is configured via N_API_KEY, N_MODELS and (optionally) N_BASE_URL.
     llm_providers: CsvList = ["nebius", "gemini", "openai"]
 
     # --- LLM roles -----------------------------------------------------------
-    # Model references are "<provider>:<model-name>".
-    llm_primary: str = "nebius:nvidia/Llama-3_3-Nemotron-Super-49B-v1_5"
-    llm_secondary: str = "gemini:gemini-2.5-flash"
+    # Model references are "<provider>:<model-name>". "Auto" in the UI uses primary,
+    # then secondary as fallback. reasoning/fast are optional per-agent overrides.
+    llm_primary: str = "nebius:nvidia/Nemotron-3_5-Lightning"
+    llm_secondary: str = "gemini:gemini-3.5-flash"
     llm_reasoning: str = ""  # SQL generation; falls back to primary
     llm_fast: str = ""  # routing, insights, charts; falls back to primary
-    llm_available_models: CsvList = []
     llm_temperature: float = 0.1
     llm_timeout_seconds: float = 60.0
     llm_max_tokens: int = 4096
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     chat_history_turns: int = 6
 
     # --- Data access / safety ------------------------------------------------
-    demo_db_path: Path = BACKEND_DIR / "data" / "demo.db"
+    demo_db_path: Path = ROOT_DIR / "data" / "demo.db"
     query_row_limit: int = 1000
     query_timeout_seconds: int = 15
     allowed_db_types: CsvList = ["sqlite_demo", "postgresql", "mysql"]
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     max_message_chars: int = 4000
 
     @field_validator(
-        "cors_origins", "llm_providers", "llm_available_models", "allowed_db_types", mode="before"
+        "cors_origins", "llm_providers", "allowed_db_types", mode="before"
     )
     @classmethod
     def _split_csv(cls, value):
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     @field_validator("demo_db_path", mode="after")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
-        return value if value.is_absolute() else (BACKEND_DIR / value).resolve()
+        return value if value.is_absolute() else (ROOT_DIR / value).resolve()
 
     @field_validator("session_backend")
     @classmethod
@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     def provider_credentials(self, provider: str) -> tuple[str, str]:
         prefix = provider.upper()
         return os.getenv(f"{prefix}_API_KEY", ""), os.getenv(f"{prefix}_BASE_URL", "")
+
+    def provider_models(self, provider: str) -> list[str]:
+        """Models users can pick for a provider, from <NAME>_MODELS (comma-separated)."""
+        raw = os.getenv(f"{provider.upper()}_MODELS", "")
+        return [name.strip() for name in raw.split(",") if name.strip()]
 
 
 @lru_cache

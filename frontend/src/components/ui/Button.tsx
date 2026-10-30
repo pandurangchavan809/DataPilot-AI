@@ -1,6 +1,6 @@
-import { forwardRef, type ButtonHTMLAttributes } from "react";
+import { type ButtonHTMLAttributes, forwardRef } from "react";
 
-import { cn } from "@/lib/cn";
+import { cn } from "@/utils";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md" | "icon";

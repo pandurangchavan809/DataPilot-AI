@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react";
 
-import { api, ApiError } from "@/lib/api";
-import { useApp } from "@/store/app";
-import type { ConnectPayload } from "@/types/api";
+import { api, ApiError } from "@/api";
+import { useApp } from "@/hooks/useApp";
+import type { ConnectPayload } from "@/types";
 
 export function useConnection() {
   const setConnection = useApp((s) => s.setConnection);

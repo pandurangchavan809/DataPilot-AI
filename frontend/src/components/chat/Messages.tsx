@@ -2,8 +2,8 @@ import { AlertCircle, Cpu, RotateCcw } from "lucide-react";
 import { lazy, Suspense } from "react";
 
 import { Logo } from "@/components/ui/Logo";
-import { useApp } from "@/store/app";
-import type { AssistantMessage as AssistantMsg, UserMessage as UserMsg } from "@/types/chat";
+import { useApp } from "@/hooks/useApp";
+import type { AssistantMessage as AssistantMsg, UserMessage as UserMsg } from "@/types";
 
 import { AgentTrace } from "./AgentTrace";
 import { Markdown } from "./Markdown";

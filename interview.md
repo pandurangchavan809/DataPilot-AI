@@ -150,7 +150,7 @@ React (chat, trace, table, chart)  ──SSE──▶  Flask API
 
 > All three providers (Nebius Token Factory, Gemini and OpenAI) expose an OpenAI-compatible Chat
 > Completions API, so I use one client library with a different `base_url` per provider. Models are
-> written as `provider:model`, for example `nebius:nvidia/Llama-3_3-Nemotron-Super-49B-v1_5`. The
+> written as `provider:model`, for example `nebius:nvidia/Nemotron-3_5-Lightning`. The
 > `.env` assigns models to roles:
 >
 > - `LLM_PRIMARY`: the default for every role.
@@ -173,8 +173,10 @@ React (chat, trace, table, chart)  ──SSE──▶  Flask API
 
 ### Q7. Why Nemotron, and what is the `<think>` handling?
 
-> Nemotron Super 49B is the mid-size model on Nebius Token Factory: good at reasoning and SQL, much
-> cheaper and faster than the largest models. Reasoning models emit `<think>…</think>` blocks before
+> Nemotron 3.5 Lightning on Nebius Token Factory is a 30B mixture-of-experts model with only 3B
+> parameters active per token. That makes it very fast and cheap ($0.06 per million input tokens),
+> and in my tests it wrote correct SQL for the demo questions. Qwen3-235B is offered as a larger
+> alternative. Reasoning models emit `<think>…</think>` blocks before
 > the answer. The gateway strips them, and for streaming I wrote a small state-machine filter that
 > handles tags split across chunks, so users never see raw reasoning.
 
@@ -391,17 +393,18 @@ React (chat, trace, table, chart)  ──SSE──▶  Flask API
 > It was the v1 prototype. The new architecture replaced it completely, so I removed it to keep the
 > repo clear. It's still in the git history.
 
-### Q2. Why is there a `requirements.txt` at the root and in `backend/`?
+### Q2. Why is the backend at the repo root and the frontend in a folder?
 
-> The backend owns its dependencies in `backend/requirements.txt`. The root file just includes it
-> (`-r backend/requirements.txt`) for hosting platforms and tools that look for a root
-> `requirements.txt`. There's one source of truth.
+> I'm mainly a backend engineer, so the repo is backend-first: the Flask app, its `.env`,
+> `requirements.txt` and `Dockerfile` sit at the root, with one `.gitignore` covering everything. The
+> React app lives in `frontend/` and is deployed separately. It's self-contained, so it can be copied
+> or deployed on its own, and it reaches the backend through `VITE_API_BASE_URL`.
 
-### Q3. Why is `.env` inside `backend/` and not at the root?
+### Q3. How do the two `.env` files differ?
 
-> The backend is the only service with secrets. Keeping its `.env` next to its code means the
-> backend Docker image and `docker compose` (`env_file: backend/.env`) use the same file. The
-> frontend only needs a public build-time variable, `VITE_API_BASE_URL`.
+> The root `.env` belongs to the backend and holds all secrets: API keys and `SECRET_KEY`. It's
+> gitignored. `frontend/.env` holds only the backend URL, because anything in a frontend `.env` is
+> built into JavaScript that every user can read. API keys must never go there.
 
 ## 10. Roadmap ("What would you do next?")
 

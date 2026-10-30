@@ -2,7 +2,7 @@ import { ArrowRight, BarChart3, Database, Globe2, LineChart, PlugZap, ShieldChec
 
 import { Button } from "@/components/ui/Button";
 import { Logo } from "@/components/ui/Logo";
-import { useApp } from "@/store/app";
+import { useApp } from "@/hooks/useApp";
 
 const DEMO_SUGGESTIONS = [
   { icon: TrendingUp, text: "Which 10 countries have the highest GDP per capita?" },

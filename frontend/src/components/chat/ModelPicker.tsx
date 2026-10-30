@@ -1,9 +1,9 @@
 import { Check, ChevronDown, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { cn } from "@/lib/cn";
-import { useApp } from "@/store/app";
-import type { ModelInfo } from "@/types/api";
+import { cn } from "@/utils";
+import { useApp } from "@/hooks/useApp";
+import type { ModelInfo } from "@/types";
 
 export function ModelPicker() {
   const config = useApp((s) => s.config);
@@ -35,7 +35,6 @@ export function ModelPicker() {
     (acc[m.provider_label] ??= []).push(m);
     return acc;
   }, {});
-  const label = (id: string) => config.models.find((m) => m.id === id)?.label ?? id.split(":").pop();
 
   return (
     <div ref={ref} className="relative">
@@ -62,7 +61,7 @@ export function ModelPicker() {
             active={model === "auto"}
             onClick={() => (setModel("auto"), setOpen(false))}
             title="Auto"
-            subtitle={`Role-based routing · SQL: ${label(config.auto_model.reasoning)} · Fast: ${label(config.auto_model.fast)}`}
+            subtitle="Primary, then secondary fallback"
             badge="Recommended"
           />
           {Object.entries(groups).map(([provider, items]) => (

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useChat } from "@/hooks/useChat";
 import { useConnection } from "@/hooks/useConnection";
-import { useApp } from "@/store/app";
+import { useApp } from "@/hooks/useApp";
 
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";

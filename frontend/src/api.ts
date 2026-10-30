@@ -1,4 +1,4 @@
-import type { ApiErrorBody, ClientConfig, ConnectPayload, ConnectionState } from "@/types/api";
+import type { ApiErrorBody, ClientConfig, ConnectionState, ConnectPayload } from "@/types";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 

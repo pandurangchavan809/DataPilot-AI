@@ -1,3 +1,7 @@
+import clsx, { type ClassValue } from "clsx";
+
+export const cn = (...inputs: ClassValue[]) => clsx(inputs);
+
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
 const full = new Intl.NumberFormat("en", { maximumFractionDigits: 2 });
 

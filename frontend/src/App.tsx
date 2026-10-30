@@ -5,8 +5,8 @@ import { ChatView } from "@/components/chat/ChatView";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Button } from "@/components/ui/Button";
-import { api, ApiError } from "@/lib/api";
-import { useApp } from "@/store/app";
+import { api, ApiError } from "@/api";
+import { useApp } from "@/hooks/useApp";
 
 export default function App() {
   const setConfig = useApp((s) => s.setConfig);

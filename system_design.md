@@ -67,13 +67,13 @@ pipeline of AI agents writes SQL, verifies that it is read-only, runs it, and st
 
 | Layer | Folder | Responsibility |
 |---|---|---|
-| API | `backend/app/api/` | HTTP routes, request validation, SSE response |
-| Agents | `backend/app/agents/` | Orchestrator plus one module per agent, and all prompts |
-| LLM | `backend/app/llm/` | Provider registry (clients, models, roles) and gateway (calls, fallback, streaming) |
-| DB | `backend/app/db/` | Connectors, SQL guard, executor, schema introspection, session store, connection manager |
-| Core | `backend/app/core/` | Errors, logging, JSON serialization |
-| Config | `backend/app/config.py` | All settings, loaded from `backend/.env` |
-| Wiring | `backend/app/services.py`, `__init__.py` | Builds the shared services once and creates the Flask app |
+| API | `app/api/` | HTTP routes, request validation, SSE response |
+| Agents | `app/agents/` | Orchestrator plus one module per agent, and all prompts |
+| LLM | `app/llm/` | Provider registry (clients, models, roles) and gateway (calls, fallback, streaming) |
+| DB | `app/db/` | Connectors, SQL guard, executor, schema introspection, session store, connection manager |
+| Core | `app/core/` | Errors, logging, JSON serialization |
+| Config | `app/config.py` | All settings, loaded from the root `.env` |
+| Wiring | `app/services.py`, `__init__.py` | Builds the shared services once and creates the Flask app |
 
 Dependencies point one way: **API → Agents → (LLM, DB) → Core**. Agents never import Flask, and
 the DB layer knows nothing about LLMs. Each part can be tested and replaced on its own.
@@ -186,7 +186,7 @@ latency bounded, makes every run auditable (the user sees each step), and leaves
 little room to change what the system does. The SQL ⇄ Guard ⇄ Executor loop is where the system
 acts like an agent: it reads tool feedback and corrects itself.
 
-**Prompts** all live in `backend/app/agents/prompts.py`. Each agent has a strict output contract:
+**Prompts** all live in `app/agents/prompts.py`. Each agent has a strict output contract:
 JSON, or a fenced `sql` block plus `Explanation:`. Parsers are tolerant (they strip `<think>`
 blocks and code fences) and validate everything they extract.
 
@@ -196,10 +196,13 @@ blocks and code fences) and validate everything they extract.
 
 ### 5.1 Provider registry (`llm/registry.py`)
 
-- Reads `LLM_PROVIDERS` and builds one OpenAI client per provider **that has an API key**, using
-  `<NAME>_API_KEY` and `<NAME>_BASE_URL`.
-- Models are written `provider:model`. Role models are `LLM_PRIMARY`, `LLM_SECONDARY`,
-  `LLM_REASONING` and `LLM_FAST`. Pickable models come from `LLM_AVAILABLE_MODELS`.
+- Builds one OpenAI client per provider (`nebius`, `gemini`, `openai` by default) **that has an API
+  key** (`<NAME>_API_KEY`). Base URLs have built-in defaults and can be overridden with
+  `<NAME>_BASE_URL`.
+- The model picker shows each enabled provider's `<NAME>_MODELS` list plus the role models.
+- **Auto** uses `LLM_PRIMARY`, then `LLM_SECONDARY` as fallback. Two optional, advanced settings,
+  `LLM_REASONING` (SQL agent) and `LLM_FAST` (other agents), can give agents their own model; when
+  unset they use the primary.
 - Validates the model a user picks against that allow-list.
 
 ### 5.2 Gateway (`llm/gateway.py`)
@@ -270,13 +273,13 @@ can serve any request.
 | **flask-limiter** | Per-IP rate limits on chat and connect endpoints | Protects LLM spend and user databases from abuse. It's keyed by IP rather than session id, because session ids are client-generated and could be rotated to dodge the limit. The counters can live in Redis. |
 | **Werkzeug ProxyFix** | Recovers the real client IP and scheme behind nginx or a load balancer | Without it, every request looks like it comes from the proxy, and rate limiting breaks. |
 | **Pydantic v2** | Validates request bodies and the connection config | Typed, declarative validation with clear error messages, the same benefit FastAPI gets from it. |
-| **pydantic-settings + python-dotenv** | Loads and validates all configuration from `backend/.env` and environment variables | One typed, validated place for configuration. The app fails fast on bad config, and real environment variables override `.env` in Docker or on hosting platforms. |
+| **pydantic-settings + python-dotenv** | Loads and validates all configuration from `.env` and environment variables | One typed, validated place for configuration. The app fails fast on bad config, and real environment variables override `.env` in Docker or on hosting platforms. |
 | **OpenAI Python SDK** | One client for every LLM provider | Nebius Token Factory, Gemini and OpenAI all expose OpenAI-compatible endpoints, so one SDK plus a `base_url` covers all of them, including streaming, timeouts and retries. Adding a provider needs only `.env` lines. |
 | **SQLAlchemy 2.0** | Engines, connection pools, schema inspection, connection events | One API across SQLite, PostgreSQL and MySQL. Its pooling and connect-time events are where read-only mode and timeouts are applied. |
 | **sqlglot** | Parses SQL into an AST for the guard, across dialects | A real parser, unlike regex, so it catches writes hidden in CTEs, multiple statements and dialect-specific forms. Pure Python with no native dependencies. |
 | **psycopg 3** (binary) | PostgreSQL driver | The modern, maintained PostgreSQL driver. Supports the session options used for read-only mode. |
 | **PyMySQL** | MySQL driver | Pure Python, so there's nothing to compile in Docker or on Windows. Reliable with SQLAlchemy. |
-| **SQLite** (stdlib) | Bundled demo database (`backend/data/demo.db`, 5 tables, top 50 countries) | Needs no server, so anyone can try the app instantly. Opened read-only like any other database. |
+| **SQLite** (stdlib) | Bundled demo database (`data/demo.db`, 5 tables, top 50 countries) | Needs no server, so anyone can try the app instantly. Opened read-only like any other database. |
 | **cryptography (Fernet)** | Encrypts database credentials in the session store | Authenticated symmetric encryption that's hard to misuse. The key is derived from `SECRET_KEY`, so a leaked Redis dump doesn't reveal passwords. |
 | **Redis** | Shared session store (with TTL) and rate-limit counters in production | See section 9. |
 | **gunicorn** (gthread workers) | Production WSGI server | Several processes for CPU and fault isolation. Threads make long-lived SSE streams cheap, because a waiting stream holds a thread rather than a process. The 180 s timeout leaves room for slow LLM answers. |
@@ -341,19 +344,21 @@ Memcached has no rate-limiter integration as good as Redis's.
 
 ## 10. Configuration
 
-Everything is driven by environment variables, loaded from `backend/.env` and validated by
-`pydantic-settings`. Real environment variables take precedence.
+Everything is driven by environment variables, loaded from the root `.env` and validated by
+`pydantic-settings`. Real environment variables take precedence. `.env` only lists the settings you
+normally change; every other setting has a default in `app/config.py`.
 
 | Group | Examples |
 |---|---|
 | App | `APP_ENV`, `SECRET_KEY`, `LOG_LEVEL`, `CORS_ORIGINS`, `PROXY_FIX_HOPS` |
-| LLM | `LLM_PROVIDERS`, `<NAME>_API_KEY`, `<NAME>_BASE_URL`, `LLM_PRIMARY`, `LLM_SECONDARY`, `LLM_REASONING`, `LLM_FAST`, `LLM_AVAILABLE_MODELS`, `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_TOKENS` |
+| LLM | `<NAME>_API_KEY`, `<NAME>_MODELS`, `LLM_PRIMARY`, `LLM_SECONDARY` (optional: `<NAME>_BASE_URL`, `LLM_PROVIDERS`, `LLM_REASONING`, `LLM_FAST`, `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_TOKENS`) |
 | Agents | `MAX_SQL_RETRIES`, `SCHEMA_FULL_CONTEXT_MAX_TABLES`, `SCHEMA_SAMPLE_ROWS`, `CHAT_HISTORY_TURNS` |
 | Data | `DEMO_DB_PATH`, `QUERY_ROW_LIMIT`, `QUERY_TIMEOUT_SECONDS`, `ALLOWED_DB_TYPES`, `MAX_MESSAGE_CHARS` |
 | Infrastructure | `SESSION_BACKEND`, `SESSION_TTL_MINUTES`, `REDIS_URL`, `ENGINE_CACHE_SIZE`, `RATE_LIMIT`, `RATE_LIMIT_STORAGE_URI` |
 
-The frontend has a single build-time variable, `VITE_API_BASE_URL`, which is needed only when the
-API is on a different domain. See [tutorial.md](tutorial.md) for step-by-step recipes.
+The frontend has a single build-time variable in `frontend/.env`: `VITE_API_BASE_URL`, the backend's
+URL. The browser calls the backend directly, so the backend's `CORS_ORIGINS` must include the
+frontend's URL. See [tutorial.md](tutorial.md) for step-by-step recipes.
 
 ---
 

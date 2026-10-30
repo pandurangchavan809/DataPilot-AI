@@ -1,7 +1,7 @@
 import { Check, ChevronDown, Code2, Copy } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
-import { cn } from "@/lib/cn";
+import { cn } from "@/utils";
 
 const TOKEN = new RegExp(
   [

@@ -1,10 +1,9 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
-import { setSessionId } from "@/lib/api";
-import { uid } from "@/lib/format";
-import type { ClientConfig, ConnectionState } from "@/types/api";
-import type { AssistantMessage, ChatMessage } from "@/types/chat";
+import { setSessionId } from "@/api";
+import { uid } from "@/utils";
+import type { AssistantMessage, ChatMessage, ClientConfig, ConnectionState } from "@/types";
 
 /** sessionStorage that never throws (private mode, quota exceeded, etc.). */
 const safeSessionStorage: StateStorage = {
