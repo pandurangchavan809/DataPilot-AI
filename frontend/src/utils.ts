@@ -2,6 +2,12 @@ import clsx, { type ClassValue } from "clsx";
 
 export const cn = (...inputs: ClassValue[]) => clsx(inputs);
 
+/** "pandurang809@gmail.com" -> "pandurang809" */
+export const displayName = (email: string) => email.split("@")[0];
+
+/** "pandurang809@gmail.com" -> "PA" */
+export const initials = (email: string) => displayName(email).slice(0, 2).toUpperCase();
+
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 2 });
 const full = new Intl.NumberFormat("en", { maximumFractionDigits: 2 });
 

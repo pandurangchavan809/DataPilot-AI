@@ -93,6 +93,26 @@ export interface ChartSpec {
   max_points: number;
 }
 
+// --- Auth ---
+export interface AuthUser {
+  id: number;
+  email: string;
+  created_at: number;
+  last_login_at: number | null;
+  login_count: number;
+}
+
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+}
+
+export interface AuthResponse extends AuthTokens {
+  token_type: "Bearer";
+  expires_in: number;
+  user: AuthUser;
+}
+
 export interface ApiErrorBody {
   error: { code: string; message: string };
 }

@@ -37,7 +37,7 @@ In production, replace both with the real URLs, for example
 
 ```env
 APP_ENV=development                 # use "production" when deployed
-SECRET_KEY=a-long-random-string     # encrypts DB passwords in sessions; keep it secret
+SECRET_KEY=a-long-random-string     # encrypts DB passwords and signs login tokens; keep it secret
 CORS_ORIGINS=http://localhost:5173  # frontend URL(s), comma-separated
 
 NEBIUS_API_KEY=                     # empty = provider switched off
@@ -133,6 +133,10 @@ Every setting has a default in `app/config.py`. Add a line to `.env` only to cha
 | `QUERY_TIMEOUT_SECONDS` | `15` | Database query time limit |
 | `RATE_LIMIT` | `30/minute` | Requests allowed per IP address |
 | `SESSION_TTL_MINUTES` | `60` | Idle time before a DB connection is forgotten |
+| `DEMO_USER_EMAIL` / `DEMO_USER_PASSWORD` | `user` / `User@1234` | Demo login created on start. Set `DEMO_USER_EMAIL=` (empty) to turn it off. |
+| `ACCESS_TOKEN_MINUTES` / `REFRESH_TOKEN_DAYS` | `15` / `7` | How long login tokens last |
+| `JWT_SECRET_KEY` | `SECRET_KEY` | Separate key for signing tokens. Changing it logs everyone out. |
+| `AUTH_DB_PATH` | `auth/auth.db` | Where user accounts are stored |
 | `<NAME>_BASE_URL` | built in | Override a provider's API URL |
 | `SESSION_BACKEND`, `REDIS_URL`, `RATE_LIMIT_STORAGE_URI`, `PROXY_FIX_HOPS` | memory | Production with several workers: switch to Redis (see the commented lines in `.env.example`) |
 

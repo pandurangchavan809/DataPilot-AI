@@ -132,17 +132,21 @@ The thin layer: validate the input, call a service, return JSON or a stream. No 
 
 | File | Endpoints / functions | What it does |
 |---|---|---|
-| `__init__.py` | `register_api(app, limiter, rate_limit)` | Registers the three blueprints under `/api` and applies the rate limit to `chat` and `connections` |
-| `meta.py` | `GET /api/health` | Liveness check, plus `llm_ready` (is any provider configured?). Used by Render and Docker health checks. |
+| `__init__.py` | `register_api(app, limiter, rate_limit, auth_rate_limit)` | Registers the blueprints under `/api` (auth under `/api/auth`). Applies the rate limit to `chat` and `connections`, and a stricter one (`10/minute`) to `auth` against password guessing. |
+| `auth.py` | `POST /api/auth/signup`, `/login` | Create an account / check the password, then return an access + refresh token pair |
+| | `POST /api/auth/refresh`, `/logout` | Rotate the refresh token / revoke it |
+| | `GET /api/auth/me` | The logged-in user |
+| `meta.py` | `GET /api/health` | Public. Liveness check, plus `llm_ready` (is any provider configured?). Used by Render and Docker health checks. |
 | | `GET /api/config` | Bootstraps the UI: model list (with roles), enabled DB types, limits |
 | `connections.py` | `POST /api/connections` | Validate config → connect read-only → introspect schema → return connection and schema |
 | | `GET /api/connections/current` | Current session's connection (so a page refresh keeps it) |
 | | `DELETE /api/connections/current` | Disconnect, dispose the engine, delete the session data |
 | | `POST /api/schema/refresh` | Re-read the schema after the database changed |
 | `chat.py` | `POST /api/chat` | **The main endpoint.** See below. |
-| `deps.py` | `session_id()` | Reads the `X-Session-Id` header and validates the format (16–64 chars of letters, digits and dashes) |
+| `deps.py` | `require_auth()` | Runs before every request on the `meta_private`, `connections` and `chat` blueprints. Reads `Authorization: Bearer …`, verifies the JWT, and puts the user id in `flask.g`. Missing or invalid → 401. |
+| | `session_id()` | Reads the `X-Session-Id` header, validates the format (16–64 chars of letters, digits and dashes) and prefixes it with the user id (`u7-<id>`), so one user can never reach another user's DB connection |
 | | `parse_body(Model)` | Parses JSON into a Pydantic model; bad input gives a clean 400 |
-| `schemas.py` | `ChatRequest`, `HistoryTurn`, `ConnectRequest` | Request shapes. History is limited to 50 turns. |
+| `schemas.py` | `ChatRequest`, `HistoryTurn`, `ConnectRequest`, `AuthRequest`, `RefreshRequest` | Request shapes. History is limited to 50 turns. |
 
 **`chat()` in detail:**
 
@@ -155,6 +159,27 @@ The thin layer: validate the input, call a service, return JSON or a stream. No 
    `stream()` iterates `orchestrator.run(ctx)` and converts each `(event, data)` into SSE text.
 4. Headers `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` stop proxies from
    buffering the stream.
+
+---
+
+## 3b. `app/auth/`: accounts and JWT
+
+Users are stored in **`auth/auth.db`**, a SQLite file of its own at the repo root. It is separate
+from `data/demo.db`, the data users ask questions about, and gitignored. Full explanation in [auth.md](auth.md).
+
+| File | Important functions | What it does and why |
+|---|---|---|
+| `store.py` | `UserStore` | Creates three tables on start: `users`, `refresh_tokens`, `login_events`. Opens one short-lived `sqlite3` connection per operation, which is safe across gunicorn threads. |
+| | `create`, `get_by_email`, `get_by_id` | Account rows. A unique email is enforced by the database (`UNIQUE` → `IntegrityError` → 409). |
+| | `record_login` | Writes every attempt (success or failure, IP, browser) to `login_events` and updates `last_login_at` / `login_count`. This is the login tracking. |
+| | `add_refresh_token`, `use_refresh_token` | Each refresh token is stored by its id (`jti`). `use_refresh_token` revokes it in one atomic `UPDATE … WHERE revoked = 0`, so it works exactly once. |
+| | `revoke_all_refresh_tokens` | Logs a user out everywhere (used on token theft). |
+| `service.py` | `AuthService.signup` | Validates the email and password strength, then hashes the password (`werkzeug` scrypt + salt) |
+| | `login` | Checks the hash. A wrong email also runs a hash check, so a wrong email and a wrong password take the same time and can't be told apart. Records the attempt. |
+| | `issue_tokens` | Signs an **access token** (HS256, 15 min) and a **refresh token** (7 days, `jti` saved in the DB) |
+| | `refresh` | Verifies the refresh token, uses it up and issues a new pair (**rotation**). A token that was already used means it was copied, so all the user's tokens are revoked. |
+| | `user_from_access_token` | Verifies the signature, expiry and `type == "access"`. No database lookup, so it's fast. |
+| | `seed_demo_user` | Creates `user` / `User@1234` on start (`DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD`; empty disables it) |
 
 ---
 

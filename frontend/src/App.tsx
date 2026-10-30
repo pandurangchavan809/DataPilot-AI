@@ -1,14 +1,23 @@
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AuthPage } from "@/components/auth/AuthPage";
 import { ChatView } from "@/components/chat/ChatView";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Button } from "@/components/ui/Button";
 import { api, ApiError } from "@/api";
 import { useApp } from "@/hooks/useApp";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function App() {
+  const user = useAuth((s) => s.user);
+  if (!user) return <AuthPage />;
+  // Keyed by user, so logging in as someone else starts from a clean state.
+  return <Workspace key={user.id} />;
+}
+
+function Workspace() {
   const setConfig = useApp((s) => s.setConfig);
   const setConnection = useApp((s) => s.setConnection);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");

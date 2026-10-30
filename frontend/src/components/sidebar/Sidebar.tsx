@@ -1,11 +1,12 @@
-import { Database, LogOut, Moon, PlugZap, RefreshCw, SquarePen, Sun, X } from "lucide-react";
+import { Database, LogOut, Moon, PlugZap, RefreshCw, SquarePen, Sun, Unplug, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Logo } from "@/components/ui/Logo";
 import { useConnection } from "@/hooks/useConnection";
-import { cn } from "@/utils";
+import { cn, displayName, initials } from "@/utils";
 import { useApp } from "@/hooks/useApp";
+import { useAuth } from "@/hooks/useAuth";
 
 import { SchemaExplorer } from "./SchemaExplorer";
 
@@ -22,6 +23,30 @@ function useTheme() {
     }
   }, [dark]);
   return { dark, toggle: () => setDark((d) => !d) };
+}
+
+function UserCard() {
+  const user = useAuth((s) => s.user);
+  const logout = useAuth((s) => s.logout);
+  if (!user) return null;
+  const isEmail = user.email.includes("@");
+  return (
+    <div className="mx-3 mt-3 flex items-center gap-2.5 rounded-xl px-1.5 py-1">
+      <span
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-xs font-semibold text-white"
+        aria-hidden
+      >
+        {initials(user.email)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium" title={user.email}>{displayName(user.email)}</p>
+        <p className="truncate text-xs text-zinc-500">{isEmail ? user.email : "Demo account"}</p>
+      </div>
+      <Button variant="ghost" size="icon" onClick={logout} aria-label="Log out" title="Log out">
+        <LogOut className="h-4 w-4" />
+      </Button>
+    </div>
+  );
 }
 
 export function Sidebar() {
@@ -57,6 +82,8 @@ export function Sidebar() {
           </Button>
         </div>
 
+        <UserCard />
+
         <div className="mx-3 mt-4 mb-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
           {connection ? (
             <>
@@ -77,7 +104,7 @@ export function Sidebar() {
                   <RefreshCw className={cn("h-3.5 w-3.5", pending && "animate-spin")} />
                 </Button>
                 <Button variant="danger" size="sm" className="ml-auto" onClick={disconnect} aria-label="Disconnect">
-                  <LogOut className="h-3.5 w-3.5" />
+                  <Unplug className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </>

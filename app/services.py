@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from flask import current_app
 
+from .auth import AuthService, UserStore
 from .config import Settings
 from .db.manager import ConnectionManager
 from .db.session_store import build_session_store
@@ -19,6 +20,7 @@ class Services:
     registry: ProviderRegistry
     llm: LLMGateway
     connections: ConnectionManager
+    auth: AuthService
 
     @classmethod
     def build(cls, settings: Settings) -> "Services":
@@ -28,6 +30,7 @@ class Services:
             registry=registry,
             llm=LLMGateway(settings, registry),
             connections=ConnectionManager(settings, build_session_store(settings)),
+            auth=AuthService(settings, UserStore(settings.auth_db_path)),
         )
 
 

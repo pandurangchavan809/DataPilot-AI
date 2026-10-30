@@ -65,7 +65,7 @@ The browser calls the Render backend **directly**, so two settings must point at
    |---|---|---|
    | `PYTHON_VERSION` | `3.11.9` | Same Python the project is tested on |
    | `APP_ENV` | `production` | JSON logs, production behaviour |
-   | `SECRET_KEY` | *(the long random string)* | Encrypts users' DB passwords in sessions |
+   | `SECRET_KEY` | *(the long random string)* | Encrypts users' DB passwords in sessions and signs login tokens (JWT) |
    | `CORS_ORIGINS` | `https://<your-frontend>.vercel.app` | Only your frontend may call the API. Fill it in after step 1.4, then redeploy. |
    | `PROXY_FIX_HOPS` | `1` | Render sits behind a proxy; needed for correct per-IP rate limits |
    | `WEB_CONCURRENCY` | `1` | **One worker process** while sessions are in memory (see 1.6) |
@@ -142,8 +142,12 @@ Each user's database connection is kept in a **session store**:
 
 - **Cold starts:** Render's free web services sleep after about 15 minutes idle. The first request
   then takes about 30–60 seconds. Paid instances don't sleep.
-- **Ephemeral disk:** the demo DB is recreated on every deploy or restart. That's fine, because it's
-  read-only seed data.
+- **Ephemeral disk:** files are wiped on every deploy or restart.
+  - The demo DB is fine with this: it's read-only seed data and is recreated on start.
+  - **User accounts (`auth/auth.db`) are wiped too.** The demo login (`user` / `User@1234`) is
+    recreated on start, but people who signed up must sign up again, and their old tokens stop working.
+  - To keep accounts, add a Render **Persistent Disk** (paid plans; e.g. mount path `/var/data`) and
+    set `AUTH_DB_PATH=/var/data/auth.db`. For many users, move accounts to Postgres.
 - **Database access:** Render must be able to reach the user's PostgreSQL or MySQL over the
   internet. If the database has an IP allow-list, add Render's outbound IPs (Render dashboard →
   service → **Connect** → Outbound).
@@ -157,6 +161,8 @@ Push to `main`. Render and Vercel both redeploy automatically.
 | Symptom | Fix |
 |---|---|
 | Browser console shows a **CORS error** | `CORS_ORIGINS` on Render must exactly match the Vercel URL (`https://`, no trailing slash). Redeploy. |
+| Logged out after every deploy | Expected on the free plan: `auth/auth.db` is on an ephemeral disk (see 1.7) |
+| Login works, then every call returns 401 | Several instances with different `SECRET_KEY` / `JWT_SECRET_KEY`. All instances must share the same key. |
 | Frontend shows "DataPilot is unavailable" | Wrong `VITE_API_BASE_URL`, or the backend is asleep or crashed. Open `/api/health`, fix the variable, redeploy Vercel. |
 | `"not connected"` right after connecting | More than one worker with memory sessions. Set `WEB_CONCURRENCY=1` or add Redis (1.6). |
 | Model missing from the picker | That provider's `*_API_KEY` is missing on Render |
@@ -169,7 +175,10 @@ Push to `main`. Render and Vercel both redeploy automatically.
 
 - [ ] API keys only in Render env vars. Never in `frontend/.env` or Vercel: anything with the
       `VITE_` prefix is visible to every user.
-- [ ] `SECRET_KEY` is long and random, and differs from your local one.
+- [ ] `SECRET_KEY` is long and random (at least 32 characters), and differs from your local one.
+      It also signs login tokens, so leaking it would let someone forge a login.
+- [ ] Decide whether reviewers should see the demo account. To turn it off, set `DEMO_USER_EMAIL=` (empty) and
+      remove the demo box from `frontend/src/components/auth/AuthPage.tsx`.
 - [ ] `CORS_ORIGINS` lists only your frontend URLs.
 - [ ] Recommend users connect with a **read-only database user**. The app also enforces read-only
       access itself in three layers (see 2.4).

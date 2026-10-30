@@ -282,6 +282,19 @@ React (chat, trace, table, chart)  ──SSE──▶  Flask API
 > schema and sample data, strict output contracts, deterministic validation, and fallbacks at every
 > step. Model choice matters less than I expected; system design matters more.
 
+### Q19. How does login work?
+
+Email and password, with JWT. Login returns two tokens. The **access token** lasts 15 minutes and goes on
+every API call as `Authorization: Bearer …`. The server only checks its signature, with no
+database lookup. The **refresh token** lasts 7 days and is used only to get a new pair. It is stored by id in
+`auth/auth.db`, so it can be revoked, and it is **rotated**: each one works once. If a used refresh
+token comes back, someone copied it, so I revoke all that user's tokens. Passwords are salted
+scrypt hashes, login is rate-limited to 10 per minute per IP, and every attempt goes to a
+`login_events` table. Accounts live in their own SQLite file, separate from the data users query.
+Full notes are in [auth.md](auth.md).
+
+---
+
 ## 7. Why this tech stack?
 
 ### Why Python and Flask?

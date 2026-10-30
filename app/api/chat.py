@@ -9,10 +9,11 @@ from ..agents.base import AgentContext, Turn
 from ..core.errors import ValidationError
 from ..core.serialization import sse_event
 from ..services import services
-from .deps import parse_body, session_id
+from .deps import parse_body, require_auth, session_id
 from .schemas import ChatRequest
 
 bp = Blueprint("chat", __name__)
+bp.before_request(require_auth)
 
 
 @bp.post("/chat")

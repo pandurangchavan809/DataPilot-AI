@@ -1,4 +1,4 @@
-import type { ApiErrorBody, ClientConfig, ConnectionState, ConnectPayload } from "@/types";
+import type { ApiErrorBody, AuthResponse, AuthTokens, ClientConfig, ConnectionState, ConnectPayload } from "@/types";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -17,8 +17,58 @@ export function setSessionId(id: string) {
   sessionId = id;
 }
 
+// --- Auth tokens: kept by the useAuth store, read here for every request ---
+let tokens: AuthTokens | null = null;
+let onTokensChanged: (t: AuthTokens | null) => void = () => {};
+
+export function setTokens(t: AuthTokens | null) {
+  tokens = t;
+}
+export function onAuthChange(fn: (t: AuthTokens | null) => void) {
+  onTokensChanged = fn;
+}
+
 function headers(extra?: HeadersInit): HeadersInit {
-  return { "Content-Type": "application/json", "X-Session-Id": sessionId, ...extra };
+  return {
+    "Content-Type": "application/json",
+    "X-Session-Id": sessionId,
+    ...(tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}),
+    ...extra,
+  };
+}
+
+/** Swap the refresh token for a new pair. Shared, so parallel 401s refresh only once. */
+let refreshing: Promise<boolean> | null = null;
+function refreshTokens(): Promise<boolean> {
+  refreshing ??= (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: tokens?.refresh_token }),
+      });
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as AuthResponse;
+      tokens = { access_token: data.access_token, refresh_token: data.refresh_token };
+      onTokensChanged(tokens);
+      return true;
+    } catch {
+      tokens = null;
+      onTokensChanged(null); // refresh token expired or revoked: back to the login page
+      return false;
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+/** fetch() with the access token; on 401 it refreshes the tokens once and retries. */
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = () => fetch(`${BASE_URL}${path}`, { ...init, headers: headers(init.headers) });
+  let res = await send();
+  if (res.status === 401 && tokens && !path.startsWith("/api/auth/") && (await refreshTokens())) res = await send();
+  return res;
 }
 
 async function toApiError(res: Response): Promise<ApiError> {
@@ -35,7 +85,7 @@ async function toApiError(res: Response): Promise<ApiError> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, { ...init, headers: headers(init?.headers) });
+    res = await authedFetch(path, init);
   } catch {
     throw new ApiError("Cannot reach the DataPilot server. Is the backend running?", 0, "network_error");
   }
@@ -45,6 +95,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  login: (email: string, password: string) =>
+    request<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  signup: (email: string, password: string) =>
+    request<AuthResponse>("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) }),
+  logout: (refresh_token: string) =>
+    request<void>("/api/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token }) }),
   config: () => request<ClientConfig>("/api/config"),
   currentConnection: () => request<ConnectionState>("/api/connections/current"),
   connect: (payload: ConnectPayload) =>
@@ -65,9 +121,9 @@ export async function* streamChat(
 ): AsyncGenerator<StreamEvent> {
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}/api/chat`, {
+    res = await authedFetch("/api/chat", {
       method: "POST",
-      headers: headers({ Accept: "text/event-stream" }),
+      headers: { Accept: "text/event-stream" },
       body: JSON.stringify(body),
       signal,
     });

@@ -5,10 +5,11 @@ from __future__ import annotations
 from flask import Blueprint, jsonify
 
 from ..services import services
-from .deps import parse_body, session_id
+from .deps import parse_body, require_auth, session_id
 from .schemas import ConnectRequest
 
 bp = Blueprint("connections", __name__)
+bp.before_request(require_auth)
 
 
 def _payload(active) -> dict:

@@ -9,7 +9,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
-RUN useradd --create-home appuser && mkdir -p data && chown -R appuser /app
+RUN useradd --create-home appuser && mkdir -p data auth && chown -R appuser /app
 USER appuser
 
 EXPOSE 5000

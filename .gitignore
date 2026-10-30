@@ -6,8 +6,9 @@ frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
-# --- Local data (demo.db is re-created on start) ---
+# --- Local data (demo.db and auth/auth.db are re-created on start) ---
 data/
+/auth/
 *.db
 *.sqlite
 *.sqlite3

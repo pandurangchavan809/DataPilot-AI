@@ -51,6 +51,8 @@ interface AppState {
   addMessage: (m: ChatMessage) => void;
   updateAssistant: (id: string, fn: (m: AssistantMessage) => AssistantMessage) => void;
   newChat: () => void;
+  /** Wipe everything tied to the signed-in user (called on logout). */
+  reset: () => void;
 }
 
 export const useApp = create<AppState>()(
@@ -79,6 +81,11 @@ export const useApp = create<AppState>()(
           messages: s.messages.map((m) => (m.id === id && m.role === "assistant" ? fn(m) : m)),
         })),
       newChat: () => set({ messages: [], draft: "" }),
+      reset: () => {
+        const sessionId = uid();
+        setSessionId(sessionId);
+        set({ sessionId, messages: [], draft: "", connection: { connection: null, schema: null }, connectOpen: false });
+      },
     }),
     {
       name: "datapilot-session",

@@ -246,12 +246,19 @@ Other protections:
 
 | State | Where it lives | Lifetime |
 |---|---|---|
+| User accounts, refresh tokens, login history | `auth/auth.db` (SQLite, separate from demo data) | Permanent (on a persistent disk) |
+| Access + refresh tokens (client copy) | Browser `localStorage` | Until logout or refresh-token expiry (7 days) |
 | Chat messages | Browser `sessionStorage` (Zustand persist) | Until the tab closes |
 | Session id | Browser `sessionStorage` | Until the tab closes |
 | Connection config (incl. password) | Session store, **Fernet-encrypted** | `SESSION_TTL_MINUTES`, renewed on each use |
 | Live DB engine (connection pool) | Per-process LRU cache (`ENGINE_CACHE_SIZE`) | Until evicted; the pool is disposed on eviction |
 | Schema | Cached in each process next to the engine; re-read when the engine is rebuilt or the user clicks refresh | Same as the engine |
 | Rate-limit counters | Redis (prod) or memory (dev) | Rate-limit window |
+
+**Authentication.** Every API call except `/api/health` and `/api/auth/*` needs a JWT access token.
+Access tokens are stateless (signature check only), so any worker can verify them without shared
+state. Refresh tokens are stored in `auth/auth.db` so they can be rotated and revoked. DB sessions
+are keyed by user id plus session id, so users are isolated from each other. Details: [auth.md](auth.md).
 
 **How a worker serves a session it hasn't seen.** Suppose worker A handled `connect` and worker B
 receives the next `chat`. B finds no engine in its cache, so it loads the encrypted config from
@@ -351,6 +358,7 @@ normally change; every other setting has a default in `app/config.py`.
 | Group | Examples |
 |---|---|
 | App | `APP_ENV`, `SECRET_KEY`, `LOG_LEVEL`, `CORS_ORIGINS`, `PROXY_FIX_HOPS` |
+| Auth | `AUTH_DB_PATH`, `JWT_SECRET_KEY` (defaults to `SECRET_KEY`), `ACCESS_TOKEN_MINUTES`, `REFRESH_TOKEN_DAYS`, `DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD`, `AUTH_RATE_LIMIT` |
 | LLM | `<NAME>_API_KEY`, `<NAME>_MODELS`, `LLM_PRIMARY`, `LLM_SECONDARY` (optional: `<NAME>_BASE_URL`, `LLM_PROVIDERS`, `LLM_REASONING`, `LLM_FAST`, `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_TOKENS`) |
 | Agents | `MAX_SQL_RETRIES`, `SCHEMA_FULL_CONTEXT_MAX_TABLES`, `SCHEMA_SAMPLE_ROWS`, `CHAT_HISTORY_TURNS` |
 | Data | `DEMO_DB_PATH`, `QUERY_ROW_LIMIT`, `QUERY_TIMEOUT_SECONDS`, `ALLOWED_DB_TYPES`, `MAX_MESSAGE_CHARS` |

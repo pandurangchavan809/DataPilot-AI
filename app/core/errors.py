@@ -23,6 +23,21 @@ class ValidationError(AppError):
     code = "validation_error"
 
 
+class AuthError(AppError):
+    status_code = 401
+    code = "unauthorized"
+
+    def __init__(self, message: str = "Please log in.", *, code: str | None = None):
+        super().__init__(message)
+        if code:
+            self.code = code
+
+
+class ConflictError(AppError):
+    status_code = 409
+    code = "conflict"
+
+
 class NotConnectedError(AppError):
     status_code = 409
     code = "not_connected"

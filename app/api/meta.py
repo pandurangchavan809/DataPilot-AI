@@ -6,8 +6,11 @@ from flask import Blueprint, jsonify
 
 from ..llm.registry import PROVIDER_LABELS
 from ..services import services
+from .deps import require_auth
 
-bp = Blueprint("meta", __name__)
+bp = Blueprint("meta", __name__)  # public
+private_bp = Blueprint("meta_private", __name__)  # needs login
+private_bp.before_request(require_auth)
 
 
 @bp.get("/health")
@@ -20,7 +23,7 @@ def health():
     )
 
 
-@bp.get("/config")
+@private_bp.get("/config")
 def client_config():
     svc = services()
     roles = svc.registry.roles()

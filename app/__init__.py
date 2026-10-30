@@ -40,15 +40,17 @@ def create_app(settings: Settings | None = None) -> Flask:
     CORS(
         app,
         resources={r"/api/*": {"origins": settings.cors_origins}},
-        allow_headers=["Content-Type", "X-Session-Id"],
+        allow_headers=["Content-Type", "X-Session-Id", "Authorization"],
         methods=["GET", "POST", "DELETE", "OPTIONS"],
         max_age=600,
     )
     limiter = Limiter(get_remote_address, app=app, storage_uri=settings.rate_limit_storage_uri)
 
     _ensure_demo_db(settings)
-    app.extensions["datapilot"] = Services.build(settings)
-    register_api(app, limiter, settings.rate_limit)
+    svc = Services.build(settings)
+    svc.auth.seed_demo_user()
+    app.extensions["datapilot"] = svc
+    register_api(app, limiter, settings.rate_limit, settings.auth_rate_limit)
 
     @app.errorhandler(AppError)
     def _app_error(exc: AppError):

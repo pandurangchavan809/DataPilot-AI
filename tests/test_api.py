@@ -1,27 +1,8 @@
-import uuid
-
 import pytest
 
-from app import create_app
-from app.config import Settings
 from app.core.errors import QueryExecutionError
 from app.db.connectors import ConnectionConfig, create_readonly_engine
 from app.db.executor import execute_readonly
-
-
-@pytest.fixture()
-def settings(tmp_path):
-    return Settings(secret_key="test-secret-key-for-pytest-only", demo_db_path=tmp_path / "demo.db")
-
-
-@pytest.fixture()
-def client(settings):
-    return create_app(settings).test_client()
-
-
-@pytest.fixture()
-def headers():
-    return {"X-Session-Id": str(uuid.uuid4())}
 
 
 def test_health(client):
@@ -47,8 +28,8 @@ def test_chat_requires_connection(client, headers):
     assert resp.json["error"]["code"] == "not_connected"
 
 
-def test_session_header_required(client):
-    assert client.post("/api/connections", json={"type": "sqlite_demo"}).status_code == 400
+def test_session_header_required(client, auth_header):
+    assert client.post("/api/connections", json={"type": "sqlite_demo"}, headers=auth_header).status_code == 400
 
 
 def test_database_layer_rejects_writes_even_without_guard(client, settings):

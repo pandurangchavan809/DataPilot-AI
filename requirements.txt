@@ -10,5 +10,6 @@ sqlglot>=25
 psycopg[binary]>=3.2
 pymysql>=1.1
 cryptography>=42
+PyJWT>=2.8
 redis>=5.0
 gunicorn>=22; platform_system != "Windows"

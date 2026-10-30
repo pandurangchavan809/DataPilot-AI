@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 data/
+auth/
 .venv/
 venv/
 __pycache__/

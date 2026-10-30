@@ -56,7 +56,7 @@ COPY requirements.txt .                    # 4. copy ONLY requirements first...
 RUN pip install -r requirements.txt        #    ...then install (this layer is cached)
 
 COPY . .                                   # 5. now copy the code (filtered by .dockerignore)
-RUN useradd --create-home appuser && mkdir -p data && chown -R appuser /app
+RUN useradd --create-home appuser && mkdir -p data auth && chown -R appuser /app
 USER appuser                               # 6. do not run as root (security)
 
 EXPOSE 5000                                # 7. documents the port
@@ -77,7 +77,8 @@ Why each choice matters:
    rebuild takes seconds instead of minutes.
 5. **`COPY . .`** copies the project, **minus everything listed in `.dockerignore`**.
 6. **A non-root user:** if the app were ever compromised, the attacker isn't root inside the
-   container. `data/` is created and owned by this user, so the demo database can be written.
+   container. `data/` and `auth/` are created and owned by this user, so the demo database and the
+   user-accounts database (`auth/auth.db`) can be written.
 7. **`EXPOSE`** is documentation only. Publishing a port happens with `-p` or Compose's `ports`.
 8. **`HEALTHCHECK`:** Docker calls `/api/health` every 30 s and marks the container
    `healthy` or `unhealthy`. Orchestrators use this to restart broken containers.
@@ -91,6 +92,7 @@ Files that are **never** copied into the backend image:
 ```
 .env  .env.*  !.env.example     ← secrets never baked into an image
 data/                            ← demo.db is recreated at startup
+auth/                            ← local user accounts must never end up in an image
 .venv/ venv/ __pycache__/ ...    ← local environments and caches
 tests/ frontend/ .git/ *.md      ← not needed at runtime; keeps the image small
 ```
@@ -294,6 +296,10 @@ docker run --rm -p 5000:5000 --env-file .env datapilot-api
 | Docker Desktop won't start on Windows | Enable WSL 2 and virtualization in the BIOS |
 
 ---
+
+> **User accounts in Docker:** `auth/auth.db` lives inside the container, so `docker compose down`
+> followed by a rebuild loses the accounts (the demo user is recreated on start). To keep them, mount a
+> volume, e.g. `volumes: ["auth-data:/app/auth"]` on the backend service.
 
 ## 7. Interview questions and answers
 

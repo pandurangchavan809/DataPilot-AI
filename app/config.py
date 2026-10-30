@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     query_timeout_seconds: int = 15
     allowed_db_types: CsvList = ["sqlite_demo", "postgresql", "mysql"]
 
+    # --- Authentication (JWT) ----------------------------------------------
+    # Users live in their own SQLite file, separate from the demo data.
+    auth_db_path: Path = ROOT_DIR / "auth" / "auth.db"
+    jwt_secret_key: str = ""  # signs tokens; falls back to SECRET_KEY
+    access_token_minutes: int = 15
+    refresh_token_days: int = 7
+    demo_user_email: str = "user"  # seeded on startup; empty disables the demo account
+    demo_user_password: str = "User@1234"
+    auth_rate_limit: str = "10/minute"
+
     # --- Sessions / infra ----------------------------------------------------
     session_backend: str = "memory"  # memory | redis
     session_ttl_minutes: int = 60
@@ -83,7 +93,7 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @field_validator("demo_db_path", mode="after")
+    @field_validator("demo_db_path", "auth_db_path", mode="after")
     @classmethod
     def _resolve_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else (ROOT_DIR / value).resolve()
@@ -102,6 +112,10 @@ class Settings(BaseSettings):
     @property
     def fast_model(self) -> str:
         return self.llm_fast or self.llm_primary
+
+    @property
+    def jwt_secret(self) -> str:
+        return self.jwt_secret_key or self.secret_key
 
     @property
     def is_production(self) -> bool:
