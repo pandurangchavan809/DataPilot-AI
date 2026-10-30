@@ -1,315 +1,420 @@
 # DataPilot AI Interview Preparation
 
-This file is a practical interview guide for the **DataPilot AI** project in this repository.
+A practical interview guide for **DataPilot AI** as it exists in this repository: an agentic,
+read-only natural-language analytics app with a Flask backend and a React + TypeScript frontend.
 
 Use it to prepare answers for:
 
-- project explanation
-- architecture discussion
-- AI and database questions
-- frontend and backend choices
+- project explanation and end-to-end flow
+- AI system design (agents, model routing, fallback, grounding)
+- database safety (read-only enforcement)
+- backend, frontend and deployment choices
 - "Why this tech stack?"
-- limitations, tradeoffs, and future improvements
+- limitations, trade-offs and the roadmap
 
-## 1. One minute project introduction
+## 1. One-minute project introduction
 
-If the interviewer says, **"Tell me about your project"**, you can answer:
+If the interviewer says, **"Tell me about your project"**:
 
-> DataPilot AI is an AI-powered Natural Language to SQL assistant. It allows a user to ask database questions in plain English, converts that request into SQL using Gemini, executes the SQL on either a built-in SQLite demo database or an external MySQL database, and then shows the results in a Streamlit UI. I built it with a Streamlit frontend, a FastAPI backend, SQLAlchemy for database abstraction and schema inspection, and a prompt-based Gemini integration for SQL generation and correction.
+> DataPilot AI lets people ask questions about a SQL database in plain English and get back a
+> written answer, the result table, the SQL that produced it, and a chart when they ask for one.
+> Behind the chat is a small team of agents: a router works out what the user wants, a schema agent
+> picks the relevant tables, a SQL agent writes the query, a deterministic guard checks that it is
+> read-only, and then the query runs. If it fails, the SQL agent sees the error and repairs its own
+> query. Finally a visualization agent picks a chart and an insight agent streams the answer. Users
+> can connect their own PostgreSQL or MySQL database, or try a bundled SQLite demo. Everything is
+> read-only, enforced in three independent layers. The backend is Flask with Server-Sent Events, the
+> frontend is React, TypeScript and Tailwind, and the LLM layer supports Nebius (Nemotron), Gemini
+> and OpenAI with role-based routing and automatic fallback, all configured from `.env`.
 
 Shorter version:
 
-> It is an NL2SQL application that turns English questions into SQL queries and runs them on relational databases through a simple web interface.
+> It's a ChatGPT-style analytics assistant: you ask a question in English, agents write and verify
+> read-only SQL against your database, and you get an answer, a table and a chart, streamed live.
 
 ## 2. Problem statement
 
-If the interviewer asks, **"What problem does this solve?"**
+**"What problem does this solve?"**
 
-Answer:
+> Many people know the business question but not SQL or the database structure. Analysts become a
+> bottleneck for simple questions. DataPilot closes that gap, but the hard part is trust: an LLM
+> writing SQL against a real database is risky. So the project is as much about safety and
+> transparency as about generation. Every answer shows the SQL, the data and the steps the agents
+> took, and the system cannot modify data.
 
-> Many non-technical users know what business question they want to ask, but they do not know SQL syntax or database structure. DataPilot AI reduces that gap by letting users ask in natural language while the system handles schema discovery, SQL generation, execution, and basic correction.
+## 3. Main features
 
-## 3. Main features in this project
+- Natural language → SQL → answer, streamed step by step in a chat UI
+- Agentic pipeline with self-repair (up to `MAX_SQL_RETRIES` attempts)
+- Charts on request (bar, line, area, pie, scatter) rendered inline, switchable by the user
+- Follow-up questions ("now only Europe") resolved using recent chat history
+- Connect PostgreSQL or MySQL, or use the bundled SQLite demo database
+- Read-only by design, enforced at SQL, session and transaction level
+- Multiple LLM providers and models, picked by role or chosen by the user in the UI
+- Session-only chats: nothing is stored server-side; credentials are encrypted and expire
+- Schema explorer, SQL viewer with copy, paginated result table with CSV export, dark mode, mobile layout
+- Production deployment: Docker, gunicorn, nginx, Redis, rate limiting, structured JSON logs
 
-You should be ready to mention these:
+## 4. Architecture
 
-- Natural language to SQL generation
-- Dynamic database connection
-- Support for a built-in SQLite demo database
-- Support for external MySQL databases
-- Automatic schema inspection
-- SQL execution and result display
-- SQL correction when execution fails
-- CSV download from the frontend
+**"Explain the architecture."**
 
-## 4. Architecture explanation
+> There are three tiers. The React frontend is a single-page chat app. It sends the question plus
+> the last few turns to `POST /api/chat` and reads back a Server-Sent Events stream: step updates,
+> the SQL, the result rows, a chart spec and the answer tokens. The Flask backend has an
+> orchestrator, a state machine that runs the agents in order and yields events. Agents never talk
+> to an LLM SDK directly. They go through an LLM gateway that knows which model plays which role,
+> falls back to another provider on failure, and strips reasoning `<think>` blocks. Databases are
+> reached through a connection manager that only ever creates read-only engines. Session state
+> lives in memory or Redis, so the backend is stateless and can scale horizontally.
 
-If the interviewer asks, **"Explain the architecture"**
+```
+React (chat, trace, table, chart)  ──SSE──▶  Flask API
+                                              └─ Orchestrator
+                                                  Router → Schema → SQL ⇄ Guard ⇄ Executor → Viz → Insight
+                                              └─ LLM gateway (roles, fallback)  → Nebius / Gemini / OpenAI
+                                              └─ Connection manager (read-only engines, LRU cache)
+                                              └─ Session store (memory / Redis, Fernet-encrypted creds)
+```
 
-Answer:
+## 5. End-to-end flow
 
-> The project is split into two layers. The frontend is built in Streamlit and is responsible for user input, connection selection, showing the generated SQL, running the query, and displaying result tables. The backend is built in FastAPI and exposes APIs for schema extraction, SQL generation, query execution, and query correction. The backend uses SQLAlchemy to create database engines and inspect schemas. Once the schema is extracted, it is converted into prompt context and passed to Gemini, which returns SQL. That SQL is then executed and the result is returned to the frontend.
+**"What happens when a user asks a question?"**
 
-## 5. End to end flow
+1. The frontend sends `{message, history, model}` with an `X-Session-Id` header.
+2. The backend resolves the session's connection (rebuilding the engine from the encrypted store
+   if this worker hasn't seen it yet) and validates the model choice. Errors here return normal
+   HTTP codes before any streaming starts.
+3. **Router** (fast model) classifies intent: `data`, `schema`, `general` or `write`. It detects
+   chart requests and rewrites follow-ups into standalone questions.
+   - `write` → a polite refusal, no SQL is generated.
+   - `schema` / `general` → answered directly from the schema or conversation.
+4. **Schema agent** sends the full schema if there are ≤ 15 tables. For larger schemas it asks the
+   LLM to choose tables (keyword fallback), adds foreign-key neighbours, and includes a few sample
+   rows per table.
+5. **SQL agent** (reasoning model) writes dialect-specific SQL plus a short explanation, or says it
+   cannot answer.
+6. **Guard** parses the SQL with `sqlglot` and rejects anything that isn't a single read query. It
+   adds a `LIMIT` if missing.
+7. **Executor** runs it on a read-only connection with a timeout, inside a transaction that is
+   always rolled back.
+8. If the guard or the database rejects it, the error goes back to the SQL agent, which repairs the
+   query. This repeats up to `MAX_SQL_RETRIES` times.
+9. **Viz agent** (only if a chart was requested) returns a declarative spec `{type, x, y}`, which is
+   validated against the real result columns. A heuristic covers the case where the LLM fails.
+10. **Insight agent** streams a Markdown answer grounded in the actual rows.
+11. The frontend renders each event as it arrives: the agent trace, SQL, table, chart and answer.
 
-If the interviewer asks, **"What happens when a user enters a question?"**
+## 6. Project-specific questions and answers
 
-Answer:
+### Q1. Why did you rebuild it as an agentic system?
 
-1. The user selects either the demo SQLite database or an external MySQL database.
-2. The frontend sends the connection payload to the backend.
-3. The backend inspects the schema using SQLAlchemy.
-4. The schema is formatted into prompt context.
-5. The natural language question plus schema context is sent to Gemini.
-6. Gemini returns raw SQL.
-7. The backend sends the SQL back to the frontend.
-8. The user can run the SQL.
-9. The backend executes it and returns rows or affected row count.
-10. If execution fails, the correction endpoint asks Gemini to rewrite the failed SQL and tries again.
+> The first version was a single prompt: schema in, SQL out, and the user had to click "correct" when
+> it failed. That doesn't scale to real schemas or real users. Splitting the work into agents with
+> one job each made every step easier to prompt, test and observe. Routing catches write requests
+> early. Table selection keeps large schemas within the context window. The repair loop fixes most
+> errors without the user noticing.
 
-## 6. Project specific interview questions and answers
+### Q2. Is it really "agentic" or just a pipeline?
 
-### Q1. Why did you build this project?
+> It's deliberately a constrained agent workflow, not a free-roaming tool-calling agent. The
+> orchestrator is a state machine with fixed transitions. The LLMs make decisions inside each step:
+> intent, which tables, what SQL, how to fix an error, which chart. The SQL agent reacts to tool
+> feedback (guard and database errors) in a loop. I chose that over an open-ended ReAct loop because
+> for database access you want predictable cost, bounded latency and an auditable path.
 
-> I wanted to build something that combines AI, backend development, databases, and practical usability. NL2SQL is a good real-world problem because it needs prompt engineering, schema understanding, API design, error handling, and clean UI interaction.
+### Q3. How do you guarantee the system is read-only?
 
-### Q2. What was your role in this project?
+> Three independent layers, so no single bug or prompt injection can cause a write:
+>
+> 1. **SQL guard**: `sqlglot` parses the query into an AST. It must be exactly one statement and a
+>    query node. Any insert, update, delete, DDL, `SELECT INTO` or `FOR UPDATE` node is rejected, as
+>    are dangerous functions like `pg_sleep`, `sleep`, `benchmark` and `load_extension`. A keyword
+>    check runs too, with string literals blanked out so `WHERE name = 'drop'` still works.
+> 2. **Database session**: SQLite opens with `mode=ro` and `PRAGMA query_only`. PostgreSQL uses
+>    `default_transaction_read_only=on` and `statement_timeout`. MySQL uses
+>    `SET SESSION TRANSACTION READ ONLY` and `max_execution_time`.
+> 3. **Transaction**: every query runs inside a transaction that is always rolled back.
+>
+> There's a test that bypasses the guard and sends a `DELETE` straight to the executor, to prove the
+> database layer alone rejects it. In production I'd still tell users to connect with a read-only
+> database user. Defence in depth.
 
-> I designed the overall flow, implemented the backend APIs, integrated Gemini for SQL generation, built the Streamlit frontend, added schema inspection and SQL execution logic, and created a demo SQLite dataset so the application can be tested without external infrastructure.
+### Q4. What about prompt injection, like "ignore instructions and drop the table"?
 
-### Q3. Why is schema inspection important in NL2SQL?
+> The LLM is never trusted. Even if a prompt convinced the SQL agent to emit `DROP TABLE`, the guard
+> would reject it and the session couldn't execute it anyway. In practice the router classifies it as
+> a write request and refuses before SQL is even generated. I tested exactly that case.
 
-> Without schema context, the model can hallucinate table names or columns. By inspecting the live schema first and sending that structure in the prompt, I reduce hallucination and help the model generate more valid SQL.
+### Q5. How does multi-model support work?
 
-### Q4. How does the app support multiple databases?
+> All three providers (Nebius Token Factory, Gemini and OpenAI) expose an OpenAI-compatible Chat
+> Completions API, so I use one client library with a different `base_url` per provider. Models are
+> written as `provider:model`, for example `nebius:nvidia/Llama-3_3-Nemotron-Super-49B-v1_5`. The
+> `.env` assigns models to roles:
+>
+> - `LLM_PRIMARY`: the default for every role.
+> - `LLM_SECONDARY`: the automatic fallback.
+> - `LLM_REASONING`: SQL writing and repair.
+> - `LLM_FAST`: routing, table selection, charts and insights.
+>
+> Providers without an API key are disabled automatically. Users can choose "Auto" or pin a model in
+> the UI, and the backend validates that choice against an allow-list.
 
-> I abstract database connection creation through a helper that builds different connection URLs based on the selected database type. Right now the app supports SQLite for the local demo and MySQL through SQLAlchemy with the PyMySQL driver.
+### Q6. How does fallback work, especially with streaming?
 
-### Q5. Why did you include a demo SQLite database?
+> For each call the gateway builds a candidate list: the requested model or role model, then
+> primary, then secondary, removing duplicates and disabled providers. Non-streaming calls simply
+> try the next candidate on failure. Streaming is subtler: once tokens have reached the user, a
+> different model can't take over mid-sentence. So fallback only happens if the first model fails
+> before producing any output. If the insight step fails completely, the user still gets the SQL,
+> table and chart with a short fallback message, rather than losing the whole answer. I added that
+> after a real Gemini 503 during testing.
 
-> It removes setup friction. Interviewers, recruiters, or users can test the application immediately without creating a cloud database. It also gives me a controlled dataset for demos and debugging.
+### Q7. Why Nemotron, and what is the `<think>` handling?
 
-### Q6. What tables are in the demo dataset?
+> Nemotron Super 49B is the mid-size model on Nebius Token Factory: good at reasoning and SQL, much
+> cheaper and faster than the largest models. Reasoning models emit `<think>…</think>` blocks before
+> the answer. The gateway strips them, and for streaming I wrote a small state-machine filter that
+> handles tags split across chunks, so users never see raw reasoning.
 
-> The demo dataset includes `countries`, `economy_stats`, `education_stats`, `tourism_stats`, and `tech_stats`. This structure is useful because it naturally supports joins and analytical questions across multiple domains.
+### Q8. How do you handle large schemas?
 
-### Q7. How do you generate SQL from natural language?
+> Up to `SCHEMA_FULL_CONTEXT_MAX_TABLES` (default 15) the whole schema goes in the prompt, because
+> that's the most accurate option. Above that, the schema agent gives the LLM a compact table index
+> and asks it to choose tables, with keyword matching as a fallback. It then adds tables linked by
+> foreign keys so joins still work, and includes a few sample rows. Sample values help the model
+> match real values, for example `'Asia'` and not `'asia'`.
 
-> I inspect the schema, turn it into a compact text description like table names and columns, then combine that with prompt instructions such as "return only raw SQL" and the user's natural language request. Gemini generates the SQL based on that structured prompt.
+### Q9. How do you get structured output from LLMs reliably?
 
-### Q8. How do you handle failed SQL queries?
+> Each agent has a strict output contract: JSON for the router, schema agent and viz agent, and a
+> fenced `sql` block plus `Explanation:` for the SQL agent. Parsers are tolerant: they strip think
+> blocks and code fences and extract the first JSON object. Everything is validated after parsing.
+> For example, chart columns must exist in the result. Every LLM-dependent step also has a
+> deterministic fallback, so a malformed response degrades quality but never crashes the request.
 
-> I added a correction endpoint. If a query fails, the failed SQL is sent back through the same schema-aware generation pipeline with instructions to correct it and return only valid SQL. Then the corrected SQL is executed again.
+### Q10. Why Server-Sent Events instead of WebSockets or plain JSON?
 
-### Q9. How do you return results to the user?
+> The answer flows one way, from server to client, and arrives in stages. SSE fits that exactly. It
+> works over normal HTTP, through proxies and with standard auth headers, and needs no extra server
+> infrastructure. Plain JSON would make users wait 5–15 seconds staring at a spinner. I send the
+> request as a POST, so the browser `EventSource` API doesn't work; the frontend reads the stream
+> with `fetch` and a small parser. That also gives cancellation through `AbortController` for the
+> Stop button.
 
-> The backend executes the SQL using SQLAlchemy, converts each row into a dictionary, and sends the columns and rows as JSON. The Streamlit frontend then converts that to a DataFrame and displays it in a table.
+### Q11. How are sessions and credentials handled?
 
-### Q10. How does the frontend keep track of state?
+> There are no accounts and no stored chats, which was a requirement. The frontend generates a random
+> session id and keeps chat history in `sessionStorage`, so closing the tab clears it. On connect,
+> the backend stores the connection config Fernet-encrypted, with a key derived from `SECRET_KEY`,
+> and a sliding TTL. Storage is in memory for development and Redis in production. Live database
+> engines are cached per process in an LRU and disposed when evicted. If a request lands on a worker
+> that doesn't have the engine, it rebuilds it from the encrypted store. That keeps workers stateless.
 
-> Streamlit session state stores values like the loaded schema text, generated SQL, and query results. That allows the user to generate a query first, inspect it, and then run or correct it without losing context.
+### Q12. How did you make it production-ready rather than a demo?
 
-### Q11. What were the biggest technical challenges?
+> - Configuration is centralized in `.env` and validated with `pydantic-settings`.
+> - A Flask app factory with blueprints, plus a typed error hierarchy that maps to HTTP codes and
+>   stable error codes.
+> - Request validation with Pydantic, and request size and history limits.
+> - Rate limiting per client IP with flask-limiter (Redis-backed in production), and `ProxyFix` for
+>   correct client IPs behind nginx.
+> - CORS restricted to configured origins.
+> - Structured JSON logging.
+> - gunicorn with threaded workers (cheap for long SSE streams) and nginx with proxy buffering off
+>   for SSE.
+> - Dockerfiles for both services and a compose file with Redis.
+> - Tests for the guard, the LLM parsing and the API lifecycle.
 
-> The main challenges were reducing hallucinated SQL, handling dynamic schemas, supporting more than one database type, and making the flow smooth enough that a user can connect, inspect, generate, run, and correct queries from one interface.
+### Q13. Why is there a `docker-compose.yml` at the repo root?
 
-### Q12. How do you reduce hallucination?
+> Because it describes the whole system, not a single service. It builds `./backend` and
+> `./frontend` from their own Dockerfiles, adds Redis, and connects them on one network, so the full
+> production-like stack starts with one command. Compose resolves build paths relative to the
+> file's location, so the root is the natural place for a file that spans folders. Each service is
+> still independently deployable. On Render, Railway or Kubernetes you'd deploy the two images
+> separately with a managed Redis.
 
-> I reduce it mainly through schema-aware prompting. Instead of asking the model to guess the database structure, I provide the actual table and column information from the target database. I also instruct the model to return only SQL and avoid explanation text.
+### Q14. How does charting work?
 
-### Q13. Why not let the model query the database directly?
+> The LLM never generates chart code. It returns a small declarative spec (`type`, `x`, `y`, `title`)
+> that's validated against the real columns, with a heuristic fallback: a time-like x gives a line
+> chart, few categories give a bar chart. The frontend renders it with Recharts using a fixed,
+> colorblind-validated palette, separate light and dark mode colours, and a custom tooltip. Users can
+> switch between bar, line, area and pie. Recharts is lazy-loaded, so it only downloads when the
+> first chart appears.
 
-> I wanted stronger control and separation of concerns. The model only generates SQL. The backend controls schema inspection, execution, error handling, and response formatting. That makes the system more auditable and easier to secure.
+### Q15. What were the biggest technical challenges?
 
-### Q14. How do you ensure the generated SQL is correct?
+> - **Safety:** making read-only a guarantee rather than a prompt instruction.
+> - **Streaming fallback:** you can't switch models mid-answer.
+> - **Messy model output:** reasoning tags, code fences and occasionally invalid JSON.
+> - **SSE through proxies:** buffering, timeouts and hop-by-hop headers.
+> - **Scaling with sessions:** stateless workers while keeping a user's connection, solved with an
+>   encrypted session store plus a rebuildable engine cache.
 
-> I do not assume the first output is always correct. I validate it by actually executing it. If it fails, the correction flow tries to repair it. In a production version, I would also add SQL parsing, read-only enforcement, and query safety validation before execution.
+### Q16. How do you test an LLM application?
 
-### Q15. How would you scale this project?
+> I separate the deterministic parts from the model. The guard has an allow/deny matrix across
+> dialects. The parsers are tested against messy model output: think tags, fences and missing JSON.
+> API tests cover the connection lifecycle, validation errors, session headers, and a database-level
+> write rejection that bypasses the guard. The next step is an evaluation set: questions with
+> expected results on the demo database, scored on execution accuracy, so prompt or model changes
+> can be compared objectively.
 
-> I would add connection pooling, schema caching, async job handling for long-running queries, request-level authentication, observability, prompt/version tracking, and database-specific adapters for MySQL, PostgreSQL, and SQL Server.
+### Q17. What are the current limitations?
 
-### Q16. How would you make it production ready?
+> - No user accounts or authentication. Sessions are anonymous, which suits a demo but not a
+>   multi-tenant SaaS.
+> - No automated SQL-accuracy benchmark yet.
+> - Only SQLite, PostgreSQL and MySQL.
+> - No query result caching.
+> - No clarifying questions for ambiguous requests yet: the agents make a best guess and show the SQL.
+> - Large-schema table selection could use embeddings instead of an LLM index pass.
+> - Credentials are entered per session. In an enterprise setting I'd integrate a secrets manager.
 
-> I would add authentication, role-based access, TLS, secret management, query allowlists or read-only guards, audit logs, rate limiting, structured monitoring, test coverage, and stronger prompt safety around destructive SQL.
+### Q18. What did you learn?
 
-### Q17. What are the limitations of the current version?
-
-> The current version is best described as a working prototype. It does not yet include authentication, strict SQL safety controls, advanced query validation, schema caching, full test coverage, or production-grade deployment controls. It also supports only SQLite and MySQL right now.
-
-### Q18. How would you improve SQL safety?
-
-> I would classify queries before execution, allow only `SELECT` in shared environments, block dangerous statements like `DROP`, `DELETE`, or `ALTER` unless explicitly authorized, and parse the SQL with a validator before sending it to the database.
-
-### Q19. Why is this a good AI project and not just a normal CRUD app?
-
-> The difficult part is not storing data, it is translating ambiguous human language into executable database logic while grounding the model on a live schema. That makes it a useful applied AI system rather than a standard form-based application.
-
-### Q20. What did you learn from this project?
-
-> I learned that good AI output depends heavily on context quality, not just model choice. I also learned the importance of separating model generation from execution, building a clear backend contract, and creating a zero-friction demo environment.
+> Most of the reliability in an LLM system comes from what surrounds the model: grounding it in real
+> schema and sample data, strict output contracts, deterministic validation, and fallbacks at every
+> step. Model choice matters less than I expected; system design matters more.
 
 ## 7. Why this tech stack?
 
-This section is especially useful if the interviewer asks, **"Why did you choose these technologies only?"**
+### Why Python and Flask?
 
-### Why Python?
+> Python has the best ecosystem for LLMs and databases (SQLAlchemy, sqlglot, provider SDKs). I chose
+> Flask over FastAPI because the request flow is synchronous: blocking database drivers and
+> streaming generators. Flask with gunicorn's threaded workers handles that simply and predictably.
+> Validation still uses Pydantic, so I didn't lose typed request models. Flask's app factory and
+> blueprints keep it modular.
 
-> Python was the best fit because the project combines backend APIs, AI integration, data handling, and database work. Python has a very strong ecosystem for LLMs, web backends, and data tools, so it let me build the whole system quickly without switching languages.
+**"Why not FastAPI?"**
 
-### Why FastAPI?
+> FastAPI is great for async I/O. But my database drivers are synchronous, so I'd either block the
+> event loop or wrap everything in thread pools. With Flask, gthread workers and SSE generators, the
+> concurrency model is explicit and easy to reason about. The trade-off is that I wrote small helpers
+> for body parsing and errors myself.
 
-> I chose FastAPI because it is lightweight, fast to develop with, and gives automatic request validation through Pydantic. It also provides OpenAPI docs out of the box, which is useful for debugging and backend testing.
+### Why React, TypeScript and Tailwind (instead of Streamlit)?
 
-If they ask, **"Why FastAPI instead of Flask?"**
+> The first version used Streamlit, which is great for prototypes. But a ChatGPT-style streaming
+> interface with a live agent trace, cancellation, inline charts, a model picker, a schema explorer,
+> dark mode and a mobile layout needs full UI control. TypeScript keeps the SSE event contract
+> type-safe between backend and UI. Tailwind gives a consistent design system without a component
+> library dependency. Vite gives fast builds and code splitting.
 
-> Flask is great, but FastAPI gives stronger type validation, cleaner API modeling, and built-in documentation with less manual setup.
+### Why Zustand?
 
-If they ask, **"Why FastAPI instead of Django?"**
+> The app state is small: config, connection, messages and the selected model. Zustand gives a tiny
+> global store with no boilerplate and built-in persistence to `sessionStorage`, which is exactly the
+> "session-only chat" requirement.
 
-> Django is excellent for full-stack business applications, but this project is API-first and AI-driven. I did not need a full ORM, admin panel, or monolithic framework, so FastAPI was a better fit.
+### Why SQLAlchemy and sqlglot?
 
-### Why Streamlit?
+> SQLAlchemy gives one engine and inspection API across SQLite, PostgreSQL and MySQL, plus pooling and
+> connection events where I set read-only mode. sqlglot is a real SQL parser that understands
+> multiple dialects. That's essential for the guard: regex alone can't safely tell a `SELECT` from a
+> CTE that hides a write.
 
-> Streamlit is ideal for rapid prototyping of data and AI applications. I chose it because I wanted a simple interface for query input, generated SQL review, result tables, and CSV export without spending extra time building a custom frontend in React.
+### Why the OpenAI SDK for every provider instead of LangChain?
 
-If they ask, **"Why not React?"**
+> Nebius, Gemini and OpenAI all speak the same API, so one small gateway (routing, fallback,
+> streaming, think-tag filtering) is about 200 lines I fully understand and can debug. A framework
+> would add abstraction layers and dependency churn without solving my actual problems, which are
+> role-based routing and stream-safe fallback.
 
-> React would give more control and a more polished production UI, but for this project speed of development and data-app usability were more important. Streamlit let me ship the concept faster and focus on the AI and backend logic first.
+### Why Redis?
 
-### Why SQLAlchemy?
+> Production has several gunicorn workers and possibly several containers. Sessions and rate-limit
+> counters must be shared across them. Redis does both and supports TTL-based expiry natively.
 
-> SQLAlchemy gave me a clean abstraction for engine creation, SQL execution, and schema inspection. It helped me support multiple databases more easily than writing database-specific code manually.
+### Why SQLite for the demo?
 
-If they ask, **"Why not raw database drivers only?"**
+> Zero setup. Anyone can try the app instantly. The demo database has five related tables
+> (`countries`, `economy_stats`, `education_stats`, `tourism_stats`, `tech_stats`) covering the top
+> 50 countries, so joins and real analytical questions work. It's opened read-only like any other
+> database.
 
-> Raw drivers would increase duplicated code and make multi-database support harder. SQLAlchemy gives a cleaner abstraction layer and built-in inspection support.
+### Short "why this stack" answer
 
-### Why SQLite and MySQL?
+> I optimized for safety, clarity and real-world deployability: Python for the AI and database
+> ecosystem, Flask for a simple synchronous streaming model, sqlglot and SQLAlchemy for safe
+> multi-dialect SQL, an OpenAI-compatible gateway so models are swappable from `.env`, and React with
+> TypeScript for a production-grade chat UI.
 
-> SQLite was chosen for local demo simplicity because it needs no external server. MySQL was chosen because it is common in real applications, easy to explain in interviews, and useful for showing that the project can work beyond a toy local database.
+## 8. Tough questions
 
-If they ask, **"Why not PostgreSQL?"**
+### Q1. What if the LLM writes a correct-looking but wrong query?
 
-> PostgreSQL would also be a strong choice and I would support it next. I started with MySQL because it is widely used and simple to demo with SQLAlchemy. The design can be extended to PostgreSQL with an additional driver and connection builder logic.
+> That's the main risk in NL2SQL, and you can't fully eliminate it. I mitigate it with grounding
+> (schema plus sample rows) and transparency: the SQL, its explanation and the raw rows are always
+> visible, so a user can verify the answer. The insight agent is instructed to use only the returned
+> data. Next steps are an evaluation set and clarifying questions for ambiguous requests.
 
-### Why Gemini?
+### Q2. What stops someone from running a very expensive query?
 
-> Gemini was a strong fit for prompt-based SQL generation because it is easy to integrate, fast enough for interactive use, and capable of following structured instructions like "return only SQL". It also worked well for an affordable prototype.
+> Statement timeouts at the database (PostgreSQL `statement_timeout`, MySQL `max_execution_time`,
+> and a progress-handler timeout on SQLite), an automatic `LIMIT`, row limits on fetch, blocked
+> sleep and benchmark functions, and per-IP rate limits.
 
-If they ask, **"Why not OpenAI or Claude?"**
+### Q3. Is sending credentials to the backend safe?
 
-> The project design is model-agnostic at a high level. I chose Gemini based on availability, ease of API integration, and good performance for this use case. In a production version, I would benchmark multiple models on SQL accuracy, latency, and cost before finalizing the choice.
+> They travel over HTTPS in production, are encrypted at rest in the session store, expire with the
+> session, and are never logged or returned to the client. The API returns only a public view of the
+> connection. The safest setup is still a dedicated read-only database user, which I recommend in
+> the README.
 
-### Why Pydantic and pydantic-settings?
+### Q4. Why not let the LLM call tools freely (a ReAct agent)?
 
-> Pydantic makes request models explicit and reduces runtime errors by validating inputs. `pydantic-settings` makes environment-based configuration cleaner, especially for API keys, ports, and frontend/backend settings.
+> Unbounded loops mean unpredictable cost and latency, and more room for prompt injection to steer
+> behaviour. A fixed graph with LLM decisions inside each step gives most of the benefit with
+> bounded retries and a clear audit trail. It's the same idea as LangGraph-style workflows.
 
-### Why `requests` in the frontend?
+### Q5. Why not fine-tune a model?
 
-> The frontend only needs a simple HTTP client to call backend APIs. `requests` is lightweight, readable, and enough for this Streamlit-based architecture.
+> Grounding with the live schema solves most of the problem at a fraction of the cost. Fine-tuning
+> would tie me to one model, and the project is designed so models are swappable from `.env`.
 
-### Why direct Gemini SDK usage instead of a full agent framework?
+### Q6. How would you scale to many users?
 
-> In the current implementation, direct SDK usage keeps the flow simple and easier to debug. For this project, I wanted control over the exact prompt and output handling. Agent frameworks are useful when orchestration becomes more complex, but they can add abstraction overhead early on.
+> The backend is already stateless: shared state is in Redis, engines are rebuilt on demand, and
+> workers scale horizontally behind nginx or a load balancer. Next would be schema caching in Redis,
+> result caching for repeated questions, connection pool tuning per tenant, and moving long jobs to
+> a queue if needed.
 
-## 8. Tough questions an interviewer may ask
+## 9. Repo questions someone might ask after reading the code
 
-### Q1. How do you prevent destructive SQL from running?
+### Q1. Why is the old Streamlit and FastAPI code gone?
 
-Best honest answer:
+> It was the v1 prototype. The new architecture replaced it completely, so I removed it to keep the
+> repo clear. It's still in the git history.
 
-> In the current version, that is a known limitation. The prototype focuses on SQL generation and execution flow, but production safety would require query classification, read-only restrictions by default, and blocking destructive statements before execution.
+### Q2. Why is there a `requirements.txt` at the root and in `backend/`?
 
-### Q2. Why is open CORS not ideal?
+> The backend owns its dependencies in `backend/requirements.txt`. The root file just includes it
+> (`-r backend/requirements.txt`) for hosting platforms and tools that look for a root
+> `requirements.txt`. There's one source of truth.
 
-> Open CORS is acceptable for quick local development, but it is not appropriate for production because it allows requests from any origin. In production I would restrict origins to trusted frontend domains only.
+### Q3. Why is `.env` inside `backend/` and not at the root?
 
-### Q3. How are database credentials handled?
+> The backend is the only service with secrets. Keeping its `.env` next to its code means the
+> backend Docker image and `docker compose` (`env_file: backend/.env`) use the same file. The
+> frontend only needs a public build-time variable, `VITE_API_BASE_URL`.
 
-> For the current prototype, credentials are entered through the UI and sent to the backend so the backend can create a database engine dynamically. In production I would protect that with TLS, authentication, secret management, and stricter tenant isolation.
+## 10. Roadmap ("What would you do next?")
 
-### Q4. What if the schema is very large?
+> - **v2, data ingestion:** users upload CSV or Excel files. The pipeline infers types, cleans
+>   headers and values, and loads the data into a per-session workspace database. That workspace
+>   becomes another connection type next to the demo, so the agents need no changes.
+> - An evaluation harness for SQL accuracy across models.
+> - Clarifying questions for ambiguous requests.
+> - Authentication and saved workspaces.
+> - Result caching, plus SQL Server and Snowflake connectors.
 
-> A very large schema can create token bloat and hurt accuracy. To solve that, I would add table ranking, schema summarization, query intent classification, and only send the most relevant tables and columns to the model.
+## 11. Closing line
 
-### Q5. What if the user asks an ambiguous question?
-
-> The best production approach is clarification. For example, if a user says "show growth" and there are multiple growth metrics, the system should ask a follow-up question rather than guessing.
-
-### Q6. How do you evaluate the quality of generated SQL?
-
-> I would evaluate it on execution success rate, semantic correctness, latency, cost per request, and how often correction is needed. I would also keep a benchmark set of natural language prompts and expected SQL behavior.
-
-### Q7. How would you test this project?
-
-> I would add unit tests for connection URL generation, schema formatting, and API payload validation, plus integration tests for SQLite-based generation and execution flows. I would also create prompt regression tests using fixed schemas and example prompts.
-
-### Q8. How would you support PostgreSQL or SQL Server?
-
-> I would extend the connection builder, add the correct SQLAlchemy driver, and test schema inspection plus SQL compatibility differences. The architecture already separates database URL creation from query generation, so the extension path is straightforward.
-
-### Q9. Why not fine-tune a model?
-
-> Fine-tuning is expensive and usually not the first step for an NL2SQL prototype. Grounding the model with live schema context solves a large part of the problem more quickly and with lower operational complexity.
-
-### Q10. Why not store schema embeddings and use RAG?
-
-> That can be useful for very large enterprise schemas. For this version, direct schema inspection and prompt grounding were simpler and enough for a prototype. RAG becomes more valuable when there are hundreds of tables, rich metadata, or business glossary requirements.
-
-## 9. Repo-specific questions you should be ready for
-
-These are the kinds of questions someone may ask if they actually inspect the code.
-
-### Q1. The README mentions LangChain, but the main SQL generation uses the Gemini SDK directly. Why?
-
-> That is true in the current repo. I kept the actual generation path simple by using the Gemini SDK directly for better control and easier debugging. LangChain-related dependencies were added for possible future orchestration, but the current implementation is prompt-based rather than agent-heavy.
-
-### Q2. Why is `sqlmodel` in the requirements if the project mainly uses SQLAlchemy?
-
-> The current implementation uses SQLAlchemy directly. `sqlmodel` is not central to the current flow and could be removed if it stays unused. In interviews, I would frame that as a cleanup opportunity rather than overclaiming its usage.
-
-### Q3. The README references `init_demo_db.py`, but the actual file is `init_top50_countries_db.py`. What would you say?
-
-> I would say that is a documentation inconsistency and I would fix it. In real projects, keeping docs aligned with code matters because onboarding friction is also part of engineering quality.
-
-### Q4. Why are some seeded country names showing encoding artifacts like `Brasilia`-style text corruption?
-
-> That points to a character encoding issue in the seed data file. I would standardize the file to UTF-8 and add a simple validation test to catch malformed text in seeded datasets.
-
-### Q5. Why does the correction endpoint reuse the generation pipeline instead of using a dedicated SQL repair pipeline?
-
-> For a prototype, reuse reduces complexity. The correction path still benefits from the same schema grounding. If accuracy became a problem, I would separate generation and repair prompts and evaluate them independently.
-
-## 10. Best answers for "Why this stack only?"
-
-If the interviewer asks this directly, a strong answer is:
-
-> I chose this stack to optimize for speed, clarity, and real-world relevance. Python gave me the strongest AI and backend ecosystem. FastAPI gave me clean APIs and validation. Streamlit let me build a usable demo UI quickly. SQLAlchemy made multi-database support and schema inspection easier. SQLite made the project demo-friendly, MySQL made it more realistic, and Gemini provided a fast way to convert natural language into SQL. Overall, I wanted the simplest stack that could still demonstrate AI integration, backend design, database handling, and end-to-end product thinking.
-
-Short version:
-
-> I did not want to overengineer the project. I picked tools that let me prove the core idea quickly while still showing good architecture and practical engineering decisions.
-
-## 11. Best answers for strengths and weaknesses
-
-### Strengths
-
-> The main strengths are clear separation between frontend and backend, schema-aware prompt grounding, support for both demo and external databases, and a user flow that goes from question to SQL to execution in one place.
-
-### Weaknesses
-
-> The main weaknesses are that it is still a prototype, so it lacks strong auth, strict SQL safety, full production monitoring, broader database support, and deeper automated testing.
-
-## 12. If they ask "What would you do next?"
-
-You can answer:
-
-> My next steps would be adding PostgreSQL support, restricting execution to safe query types, improving prompt quality with table selection and schema summarization, adding test coverage, and deploying the backend and frontend with proper authentication and monitoring.
-
-## 13. Final interview closing line
-
-If you want a strong final line:
-
-> This project helped me combine AI, APIs, databases, and product thinking in one system. It is not just about generating SQL, it is about building a reliable workflow around model output and making that useful for real users.
-
+> This project taught me that building with LLMs is mostly system design: grounding, contracts,
+> validation, fallbacks and transparency. The model writes the SQL, but the system around it is what
+> makes the answer safe and trustworthy.

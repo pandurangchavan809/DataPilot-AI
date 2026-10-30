@@ -1,13 +1,5 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-streamlit==1.28.1
-sqlalchemy==2.0.23
-sqlmodel==0.0.14
-pymysql==1.1.0
-requests==2.31.0
-python-dotenv==1.0.0
-langchain>=0.2.0
-langchain-google-genai>=1.0.0
-google-generativeai>=0.8.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# Convenience entry point for tools and hosts that look for requirements.txt at the repo root.
+# The backend owns its dependencies; edit backend/requirements.txt, not this file.
+#   pip install -r requirements.txt               -> runtime deps
+#   pip install -r backend/requirements-dev.txt   -> runtime + test deps
+-r backend/requirements.txt

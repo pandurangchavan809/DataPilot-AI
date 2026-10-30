@@ -61,6 +61,9 @@ LLM_FAST=gemini:gemini-2.5-flash
 LLM_AVAILABLE_MODELS=...                   # what users can pick in the UI
 ```
 
+See **[tutorial.md](tutorial.md)** for a step-by-step guide covering keys, the model picker, role
+recipes, adding providers, and which `.env` file does what.
+
 Providers without an API key are disabled automatically. Users can choose **Auto** (role-based
 routing) or pin a single model from the header. To add a new provider, append it to `LLM_PROVIDERS`
 and set `<NAME>_API_KEY` / `<NAME>_BASE_URL`.
@@ -107,6 +110,11 @@ docker compose up --build              # http://localhost:8080
 nginx serves the built SPA and proxies `/api` (SSE-safe, unbuffered) to gunicorn. Redis backs
 sessions and rate limits, so you can scale the backend horizontally.
 
+`docker-compose.yml` lives at the repo root because it ties the services together: it builds
+`./backend` and `./frontend` from their own Dockerfiles, adds Redis, and wires them on one network.
+Each service stays independently deployable. On a platform like Render, Railway or Kubernetes you
+deploy the two images separately and use a managed Redis instead.
+
 ## API
 
 | Method | Path | Description |
@@ -132,7 +140,14 @@ connection lifecycle API, and LLM output parsing (`<think>` stripping, JSON/SQL 
 ## Project layout
 
 ```
+docker-compose.yml   runs the full stack (frontend + backend + Redis) with one command
+requirements.txt     points to backend/requirements.txt (for hosts that expect a root file)
+system_design.md     architecture, workflow and tech-stack rationale
+tutorial.md          configuration guide (.env files, models, providers)
+interview.md         design notes and Q&A on the architecture and trade-offs
 backend/
+  Dockerfile, gunicorn.conf.py, wsgi.py, .env.example
+  requirements.txt / requirements-dev.txt
   app/
     agents/     orchestrator, router, schema, sql, viz, insight, prompts
     llm/        provider registry + gateway (fallback, streaming)
@@ -142,6 +157,7 @@ backend/
   scripts/seed_demo.py   demo dataset
   tests/
 frontend/
+  Dockerfile, nginx.conf
   src/
     components/  chat/, sidebar/, connection/, ui/
     hooks/       useChat (SSE streaming), useConnection
