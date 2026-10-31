@@ -54,7 +54,7 @@ pipeline of AI agents writes SQL, verifies that it is read-only, runs it, and st
 │ Cross-cutting: CORS · rate limiter · ProxyFix · errors ·  │
 │                JSON logging                               │
 │                                                           │
-│ Orchestrator (state machine)                              │
+│ Orchestrator (LangGraph state graph)                      │
 │   Router → Schema → SQL ⇄ Guard ⇄ Executor → Viz → Insight│
 │                                                           │
 │ LLM Gateway ──────────────► Nebius · Gemini · OpenAI      │
@@ -180,8 +180,8 @@ only", before the other agents run. The server keeps no chat history.
 | **Viz** | `fast` | columns + sample rows + request → chart spec | Heuristic: dates give a line chart, categories give a bar chart |
 | **Insight** | `fast` | question + SQL + rows (capped at 8,000 chars) → streamed Markdown | Short fallback text; the table and chart still show |
 
-**Why a fixed pipeline rather than a free tool-calling agent?** The orchestrator is a state machine
-with fixed transitions, and the LLMs make decisions *inside* each step. This keeps cost and
+**Why a fixed pipeline rather than a free tool-calling agent?** The orchestrator is a LangGraph
+state graph with fixed edges, and the LLMs make decisions *inside* each step. This keeps cost and
 latency bounded, makes every run auditable (the user sees each step), and leaves prompt injection
 little room to change what the system does. The SQL ⇄ Guard ⇄ Executor loop is where the system
 acts like an agent: it reads tool feedback and corrects itself.
@@ -281,6 +281,7 @@ can serve any request.
 | **Werkzeug ProxyFix** | Recovers the real client IP and scheme behind nginx or a load balancer | Without it, every request looks like it comes from the proxy, and rate limiting breaks. |
 | **Pydantic v2** | Validates request bodies and the connection config | Typed, declarative validation with clear error messages, the same benefit FastAPI gets from it. |
 | **pydantic-settings + python-dotenv** | Loads and validates all configuration from `.env` and environment variables | One typed, validated place for configuration. The app fails fast on bad config, and real environment variables override `.env` in Docker or on hosting platforms. |
+| **LangGraph** | Runs the agents as a state graph: nodes for each stage, conditional edges for routing and the SQL retry loop | Makes the flow and retries explicit and easy to draw. Its custom stream mode sends each event as it happens, which SSE needs. |
 | **OpenAI Python SDK** | One client for every LLM provider | Nebius Token Factory, Gemini and OpenAI all expose OpenAI-compatible endpoints, so one SDK plus a `base_url` covers all of them, including streaming, timeouts and retries. Adding a provider needs only `.env` lines. |
 | **SQLAlchemy 2.0** | Engines, connection pools, schema inspection, connection events | One API across SQLite, PostgreSQL and MySQL. Its pooling and connect-time events are where read-only mode and timeouts are applied. |
 | **sqlglot** | Parses SQL into an AST for the guard, across dialects | A real parser, unlike regex, so it catches writes hidden in CTEs, multiple statements and dialect-specific forms. Pure Python with no native dependencies. |

@@ -15,7 +15,7 @@ when you ask for one. Everything streams live into a ChatGPT-style interface.
 │ React + TS + Tailwind    │  SSE   │ Flask API (gunicorn gthread)                              │
 │  chat · agent trace      │◀──────▶│                                                          │
 │  tables · charts · SQL   │  JSON  │  Orchestrator ── Router ─┬─ write    → refusal           │
-└──────────────────────────┘        │   (state machine)        ├─ general  → answer            │
+└──────────────────────────┘        │   (LangGraph graph)      ├─ general  → answer            │
                                     │                          └─ data → Schema agent          │
                                     │                                   → SQL agent ◀─┐ repair │
                                     │                                   → Guard  ─────┤ loop   │
@@ -28,6 +28,23 @@ when you ask for one. Everything streams live into a ChatGPT-style interface.
                                                     │ read-only connections
                                        SQLite demo · PostgreSQL · MySQL
 ```
+
+### Agent workflow (LangGraph)
+
+The agents run as a [LangGraph](https://github.com/langchain-ai/langgraph) `StateGraph` in
+`app/agents/orchestrator.py`. Each stage is a node, and each branch is a conditional edge:
+
+```
+route ─┬─ write          → refuse
+       ├─ general/schema → converse
+       └─ data → select_schema → write_sql → guard → execute ─┬─ chart → insight
+                                      ▲         │        │    └─ insight
+                                      └─ retry ─┴────────┘    (give_up when retries run out)
+```
+
+Nodes send progress through LangGraph's stream writer, so each step and word reaches the browser
+over SSE as it happens. Model calls use the OpenAI SDK through the project's own gateway, not
+LangChain. The graph has no checkpointer, because chats aren't stored on the server.
 
 ### Agents
 
@@ -150,13 +167,14 @@ pytest -q
 
 Covers the SQL guard (allow/deny matrix across dialects), DB-level read-only enforcement, the
 connection lifecycle API, authentication (signup, login, token expiry, refresh rotation and reuse
-detection, per-user sessions), and LLM output parsing (`<think>` stripping, JSON/SQL extraction).
+detection, per-user sessions), the agent graph's routing, retries and live streaming, the LLM gateway's
+fallback rules, and LLM output parsing (`<think>` stripping, JSON/SQL extraction).
 
 ## Project layout
 
 ```
 app/                  Flask backend
-  agents/             orchestrator, router, schema, sql, viz, insight, prompts
+  agents/             orchestrator (LangGraph graph), router, schema, sql, viz, insight, prompts
   llm/                provider registry + gateway (fallback, streaming)
   db/                 connectors, guard, executor, introspection, session store, manager
   api/                Flask blueprints (auth, meta, connections, chat)
@@ -173,6 +191,7 @@ deployment.md         Render + Vercel deployment, how the agents work, all promp
 backend.md            file-by-file guide to the backend
 docker.md             Docker files, commands and interview Q&A
 auth.md               login, JWT access/refresh tokens and interview Q&A
+agent.md              LangGraph workflow, memory, guardrails, LLMOps and interview Q&A
 tutorial.md           configuration guide (.env files, models, providers)
 interview.md          design notes and Q&A on the architecture and trade-offs
 

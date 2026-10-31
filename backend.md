@@ -185,31 +185,41 @@ from `data/demo.db`, the data users ask questions about, and gitignored. Full ex
 
 ## 4. `app/agents/`: the AI brain
 
-### `orchestrator.py`: the conductor
+### `orchestrator.py`: the conductor (LangGraph)
 
-**`run(ctx)`** is a generator that yields `(event, data)` pairs. It's the state machine:
+The agent flow is a **LangGraph `StateGraph`**, built once by `build_graph()` and stored in `GRAPH`.
+Each stage is a node, and each branch is a conditional edge:
 
 ```
-route ─┬─ write    → fixed refusal text
-       ├─ general/schema → _conversational (streamed answer)
-       └─ data     → _data_flow
+START → route ─┬─ write          → refuse → END
+               ├─ general/schema → converse → END
+               └─ data → select_schema → write_sql ─┬─ cannot answer → END
+                                             ▲      └─ guard ─┬─ ok → execute ─┬─ ok, chart → chart → insight → END
+                                             │                │                └─ ok → insight → END
+                                             └── retry ───────┴── failed (both) ──▶ write_sql, or give_up when retries run out
 ```
 
-**`_data_flow(...)`**, the main pipeline:
+| Part | What it does |
+|---|---|
+| `AgentState` | The data passed between nodes: intent, question, current attempt, last error, SQL, result, chart |
+| `route_node` | Calls the router agent, which decides the intent |
+| `refuse_node` / `converse_node` | Fixed refusal for write requests / streamed answer for general and schema questions |
+| `select_schema_node` | Picks the tables and creates the `SqlAgent` |
+| `write_sql_node` | First attempt calls `agent.draft()`; later attempts call `agent.repair(last_error)` |
+| `guard_node` | Runs `validate_readonly_sql`. A rejection sets `failed` and `last_error`, so the graph goes back to `write_sql`. |
+| `execute_node` | Runs the query. A database error also loops back. |
+| `give_up_node` | Raises an error after `MAX_SQL_RETRIES` is used up |
+| `chart_node` / `insight_node` | Chart spec / streamed Markdown answer. An insight failure gives short fallback text, because the results were already sent. |
+| `_after_route`, `_after_guard`, `_after_execute`… | Conditional edges: plain functions that read the state and return the next node's name |
+| `run(ctx)` | Runs the graph with `stream_mode="custom"` and yields `(event, data)` pairs. Also turns errors into `error` events and always ends with `done`. |
 
-1. `select_tables`: schema step.
-2. A loop of `1 + MAX_SQL_RETRIES` attempts: `SqlAgent.draft()` or `.repair(error)`, then
-   `validate_readonly_sql` (guard), then `execute_readonly`. On a guard or DB error, the error
-   message feeds the next repair attempt.
-3. Yields `result` (the rows).
-4. If a chart was requested, `build_chart_spec` yields `chart`.
-5. `stream_insight` yields `token` events. If the insight model fails, the answer **degrades**
-   (a fallback note) instead of failing, because the rows and chart were already delivered.
+**How streaming works:** each node calls `get_stream_writer()` and sends events as it works.
+`GRAPH.stream(..., stream_mode="custom")` hands them over as they happen, so a token reaches the
+browser while its node is still running. `tests/test_orchestrator.py` checks this.
 
-**`StepTracker`** produces the `step` events (start and end, with status, detail and duration) that
-the UI shows as the live agent trace.
-**`_conversational`** streams a Markdown answer for general and schema questions.
-Errors become an `error` event; a `done` event always ends the stream.
+**Why LangGraph instead of plain Python?** The flow and the retry loop are declared in one place,
+and the graph can be drawn with `GRAPH.get_graph().draw_mermaid()`. The LLMs still only make
+decisions inside nodes, and they cannot change the edges. There's no checkpointer because chats aren't stored on the server.
 
 ### `base.py`: shared types
 
@@ -410,7 +420,7 @@ Run them with `pytest -q` from the repo root.
 `POST /api/chat {"message": "Plot top 5 countries by GDP"}`
 
 1. `api/chat.py → chat()`: validate; `services().connections.get(sid)`; `registry.resolve_override`.
-2. `agents/orchestrator.py → run()`
+2. `agents/orchestrator.py → run()` (runs the LangGraph graph)
 3. `agents/router.py → route()` → `llm/gateway.py → complete_json()` → Nebius
 4. `agents/schema_agent.py → select_tables()` → `db/introspect.py → load_samples()`
 5. `agents/sql_agent.py → SqlAgent.draft()` → gateway → model

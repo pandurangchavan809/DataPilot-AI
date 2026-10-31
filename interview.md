@@ -62,7 +62,7 @@ Shorter version:
 > There are three tiers. The React frontend is a single-page chat app. It sends the question plus
 > the last few turns to `POST /api/chat` and reads back a Server-Sent Events stream: step updates,
 > the SQL, the result rows, a chart spec and the answer tokens. The Flask backend has an
-> orchestrator, a state machine that runs the agents in order and yields events. Agents never talk
+> orchestrator, a LangGraph state graph that runs the agents and yields events. Agents never talk
 > to an LLM SDK directly. They go through an LLM gateway that knows which model plays which role,
 > falls back to another provider on failure, and strips reasoning `<think>` blocks. Databases are
 > reached through a connection manager that only ever creates read-only engines. Session state
@@ -118,7 +118,7 @@ React (chat, trace, table, chart)  ──SSE──▶  Flask API
 ### Q2. Is it really "agentic" or just a pipeline?
 
 > It's deliberately a constrained agent workflow, not a free-roaming tool-calling agent. The
-> orchestrator is a state machine with fixed transitions. The LLMs make decisions inside each step:
+> orchestrator is a LangGraph state graph with fixed edges. The LLMs make decisions inside each step:
 > intent, which tables, what SQL, how to fix an error, which chart. The SQL agent reacts to tool
 > feedback (guard and database errors) in a loop. I chose that over an open-ended ReAct loop because
 > for database access you want predictable cost, bounded latency and an auditable path.
@@ -340,6 +340,13 @@ Full notes are in [auth.md](auth.md).
 > would add abstraction layers and dependency churn without solving my actual problems, which are
 > role-based routing and stream-safe fallback.
 
+### Why LangGraph, but not LangChain?
+
+> LangGraph solves a problem I actually have: a flow with branches and a bounded retry loop, where
+> each step streams progress. Each stage is a node, and each branch is a conditional edge. It can run
+> without LangChain's model wrappers, so my nodes still call my own gateway. That keeps my fallback
+> and stream handling, and I only take on the graph runtime.
+
 ### Why Redis?
 
 > Production has several gunicorn workers and possibly several containers. Sessions and rate-limit
@@ -385,7 +392,7 @@ Full notes are in [auth.md](auth.md).
 
 > Unbounded loops mean unpredictable cost and latency, and more room for prompt injection to steer
 > behaviour. A fixed graph with LLM decisions inside each step gives most of the benefit with
-> bounded retries and a clear audit trail. It's the same idea as LangGraph-style workflows.
+> bounded retries and a clear audit trail. That's why I use a fixed LangGraph graph and not a free agent loop.
 
 ### Q5. Why not fine-tune a model?
 
