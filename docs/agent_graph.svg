@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1190" viewBox="0 0 1240 1190" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#52525b"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#d97706"/></marker>
+    <marker id="x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#dc2626"/></marker>
+    <style>
+      .e{fill:none;stroke:#52525b;stroke-width:2;marker-end:url(#a)}
+      .retry{fill:none;stroke:#d97706;stroke-width:2.5;stroke-dasharray:8 5;marker-end:url(#r)}
+      .fail{fill:none;stroke:#dc2626;stroke-width:2;marker-end:url(#x)}
+      .l{font-size:14px;fill:#3f3f46}
+      .lr{font-size:14px;fill:#b45309;font-weight:600}
+      .lf{font-size:14px;fill:#b91c1c}
+      .n{font-size:17px;font-weight:700;fill:#18181b;text-anchor:middle}
+      .s{font-size:13px;fill:#52525b;text-anchor:middle}
+      .llm{fill:#eef2ff;stroke:#6366f1;stroke-width:2}
+      .rule{fill:#ecfdf5;stroke:#059669;stroke-width:2}
+      .fix{fill:#f4f4f5;stroke:#71717a;stroke-width:2}
+      .bad{fill:#fef2f2;stroke:#dc2626;stroke-width:2}
+      .end{fill:#18181b}
+    </style>
+  </defs>
+  <rect width="1240" height="1190" fill="#ffffff"/>
+  <text x="40" y="48" font-size="27" font-weight="700" fill="#18181b">DataPilot AI: agent routing (LangGraph)</text>
+
+  <!-- Legend -->
+  <rect x="900" y="72" width="22" height="16" rx="4" class="llm"/><text x="930" y="85" class="l">Uses an LLM</text>
+  <rect x="900" y="98" width="22" height="16" rx="4" class="rule"/><text x="930" y="111" class="l">No LLM (safety check, database)</text>
+  <rect x="900" y="124" width="22" height="16" rx="4" class="fix"/><text x="930" y="137" class="l">Fixed reply</text>
+  <rect x="900" y="150" width="22" height="16" rx="4" class="bad"/><text x="930" y="163" class="l">Error</text>
+
+  <!-- Edges: routing -->
+  <path class="e" d="M680 92V118"/>
+  <path class="e" d="M680 182V248"/>
+  <text x="690" y="222" class="l">data question</text>
+  <path class="e" d="M580 150H250V248"/>
+  <text x="265" y="210" class="l">general or schema question</text>
+  <path class="e" d="M580 165H90V248"/>
+  <text x="102" y="240" class="l" transform="rotate(0)">edit request</text>
+
+  <!-- Edges: main path -->
+  <path class="e" d="M680 312V378"/>
+  <path class="e" d="M680 442V508"/>
+  <text x="690" y="482" class="l">SQL drafted</text>
+  <path class="e" d="M680 572V638"/>
+  <text x="690" y="612" class="l">read-only, safe</text>
+  <path class="e" d="M680 702V908"/>
+  <text x="690" y="812" class="l">success, no chart</text>
+  <path class="e" d="M630 702L480 778"/>
+  <text x="400" y="736" class="l">success, chart wanted</text>
+  <path class="e" d="M480 842L630 908"/>
+  <path class="e" d="M680 972V1058"/>
+
+  <!-- Edges: retry loop -->
+  <path class="retry" d="M580 540H540V410H578"/>
+  <path class="retry" style="marker-end:none" d="M580 670H540V540"/>
+  <text x="340" y="470" class="lr">failed, retries left:</text>
+  <text x="340" y="490" class="lr">the error goes back to the</text>
+  <text x="340" y="510" class="lr">SQL agent (max 3 attempts)</text>
+
+  <!-- Edges: failure and early exits -->
+  <path class="fail" d="M780 540H880L920 590"/>
+  <path class="fail" d="M780 670H880L920 625"/>
+  <text x="790" y="528" class="lf">rejected, no retries left</text>
+  <text x="790" y="692" class="lf">failed, no retries left</text>
+  <path class="fail" d="M1000 640V1090H722"/>
+  <path class="e" d="M780 410H1170V1105H720"/>
+  <text x="890" y="400" class="l">the database can't answer it</text>
+  <path class="e" d="M90 312V1090H638"/>
+  <path class="e" d="M250 312V1075H640"/>
+
+  <!-- Nodes -->
+  <rect x="630" y="60" width="100" height="32" rx="16" class="end"/><text x="680" y="82" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">START</text>
+
+  <rect x="580" y="120" width="200" height="62" rx="12" class="llm"/><text x="680" y="147" class="n">route</text><text x="680" y="168" class="s">Finds the intent, chart or not</text>
+
+  <rect x="15" y="250" width="150" height="62" rx="12" class="fix"/><text x="90" y="277" class="n">refuse</text><text x="90" y="298" class="s">Fixed refusal</text>
+  <rect x="175" y="250" width="150" height="62" rx="12" class="llm"/><text x="250" y="277" class="n">converse</text><text x="250" y="298" class="s">Streamed answer</text>
+  <rect x="580" y="250" width="200" height="62" rx="12" class="llm"/><text x="680" y="277" class="n">select_schema</text><text x="680" y="298" class="s">Picks relevant tables</text>
+
+  <rect x="580" y="380" width="200" height="62" rx="12" class="llm"/><text x="680" y="407" class="n">write_sql</text><text x="680" y="428" class="s">Drafts or repairs SQL</text>
+  <rect x="580" y="510" width="200" height="62" rx="12" class="rule"/><text x="680" y="537" class="n">guard</text><text x="680" y="558" class="s">Allows read-only SQL only</text>
+  <rect x="580" y="640" width="200" height="62" rx="12" class="rule"/><text x="680" y="667" class="n">execute</text><text x="680" y="688" class="s">Runs on a read-only session</text>
+
+  <rect x="920" y="578" width="160" height="62" rx="12" class="bad"/><text x="1000" y="605" class="n">give_up</text><text x="1000" y="626" class="s">Shows an error</text>
+
+  <rect x="390" y="780" width="180" height="62" rx="12" class="llm"/><text x="480" y="807" class="n">chart</text><text x="480" y="828" class="s">Designs the chart spec</text>
+  <rect x="580" y="910" width="200" height="62" rx="12" class="llm"/><text x="680" y="937" class="n">insight</text><text x="680" y="958" class="s">Streams the answer</text>
+
+  <rect x="640" y="1060" width="80" height="44" rx="22" class="end"/><text x="680" y="1088" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">END</text>
+
+  <text x="40" y="1150" font-size="15" fill="#3f3f46">Nodes stream their progress to the browser over SSE as they run.</text>
+</svg>

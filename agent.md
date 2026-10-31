@@ -31,6 +31,10 @@ it **doesn't do yet**, so you can defend every claim.
 
 ## 2. The graph
 
+![Agent routing graph](docs/agent_graph.png)
+
+The same graph as an editable diagram:
+
 ```mermaid
 flowchart TD
     S([START]) --> route
