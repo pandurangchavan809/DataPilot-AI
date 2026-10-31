@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from flask import current_app
+from fastapi import Request
 
 from .auth import AuthService, UserStore
 from .config import Settings
+from .core.rate_limit import RateLimiter
 from .db.manager import ConnectionManager
 from .db.session_store import build_session_store
 from .llm.gateway import LLMGateway
@@ -21,6 +22,7 @@ class Services:
     llm: LLMGateway
     connections: ConnectionManager
     auth: AuthService
+    limiter: RateLimiter
 
     @classmethod
     def build(cls, settings: Settings) -> "Services":
@@ -31,8 +33,9 @@ class Services:
             llm=LLMGateway(settings, registry),
             connections=ConnectionManager(settings, build_session_store(settings)),
             auth=AuthService(settings, UserStore(settings.auth_db_path)),
+            limiter=RateLimiter(settings.rate_limit_storage_uri),
         )
 
 
-def services() -> Services:
-    return current_app.extensions["datapilot"]
+def get_services(request: Request) -> Services:
+    return request.app.state.services

@@ -9,7 +9,7 @@ All of it is done in `.env` files, with no code changes.
 
 | File | Belongs to | What goes in it | Committed? |
 |---|---|---|---|
-| `.env` (repo root) | Backend (Flask) | API keys, models, `SECRET_KEY`, allowed frontend URL | **No** (gitignored) |
+| `.env` (repo root) | Backend (FastAPI) | API keys, models, `SECRET_KEY`, allowed frontend URL | **No** (gitignored) |
 | `.env.example` (repo root) | Template | Same keys with empty values. Copy it to make `.env`. | Yes |
 | `frontend/.env` | Frontend (React) | Only the backend URL, `VITE_API_BASE_URL` | **No** (gitignored) |
 | `frontend/.env.example` | Template | The same single line | Yes |
@@ -155,7 +155,7 @@ OPENROUTER_MODELS=anthropic/claude-sonnet-4.5
 
 ## 7. Apply and check
 
-1. Save `.env` and restart the backend (`python wsgi.py`).
+1. Save `.env` and restart the backend (`python asgi.py`).
 2. Open http://localhost:5000/api/config. `models` is exactly what the picker will show, and each
    model's `roles` shows whether it's primary or secondary.
 3. Reload the app, pick a model, and ask a demo question. The badge under the answer shows which

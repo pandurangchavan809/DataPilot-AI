@@ -1,50 +1,57 @@
-"""Request helpers shared by blueprints."""
+"""Request dependencies shared by routers."""
 
 from __future__ import annotations
 
 import re
-from typing import TypeVar
 
-from flask import g, request
-from pydantic import BaseModel
-from pydantic import ValidationError as PydanticValidationError
+from fastapi import Depends, Header, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ..core.errors import AuthError, ValidationError
-from ..services import services
-
-T = TypeVar("T", bound=BaseModel)
+from ..core.errors import AuthError, RateLimitError, ValidationError
+from ..services import Services, get_services
 
 SESSION_HEADER = "X-Session-Id"
 SESSION_ID = re.compile(r"^[A-Za-z0-9-]{16,64}$")
 
+# auto_error=False so a missing token gets our own 401 format. Also adds "Authorize" to /api/docs.
+bearer = HTTPBearer(auto_error=False)
 
-def require_auth() -> None:
-    """before_request hook for protected blueprints: needs a valid access token."""
-    if request.method == "OPTIONS":
-        return  # CORS preflight carries no token
-    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    if scheme.lower() != "bearer" or not token:
+
+def client_ip(request: Request, proxy_hops: int) -> str:
+    """The real client IP. Behind N proxies it's the Nth address from the right, the last one a proxy
+    we trust added. Addresses further left are sent by the client and could be faked."""
+    forwarded = [ip.strip() for ip in request.headers.get("x-forwarded-for", "").split(",") if ip.strip()]
+    if proxy_hops and len(forwarded) >= proxy_hops:
+        return forwarded[-proxy_hops]
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limited(setting: str):
+    """Dependency that applies the limit named by a settings field, such as "rate_limit"."""
+
+    def check(request: Request, svc: Services = Depends(get_services)) -> None:
+        ip = client_ip(request, svc.settings.proxy_fix_hops)
+        if not svc.limiter.allow(getattr(svc.settings, setting), setting, ip):
+            raise RateLimitError()
+
+    return check
+
+
+def require_auth(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    svc: Services = Depends(get_services),
+) -> dict:
+    """Needs a valid access token. Returns its claims."""
+    if credentials is None:
         raise AuthError("Please log in.")
-    claims = services().auth.user_from_access_token(token)
-    g.user_id = int(claims["sub"])
-    g.user_email = claims["email"]
+    return svc.auth.user_from_access_token(credentials.credentials)
 
 
-def session_id() -> str:
-    sid = request.headers.get(SESSION_HEADER, "")
+def session_id(
+    claims: dict = Depends(require_auth),
+    sid: str = Header(default="", alias=SESSION_HEADER),
+) -> str:
     if not SESSION_ID.match(sid):
         raise ValidationError(f"Missing or invalid {SESSION_HEADER} header.")
     # Scope the DB session to the logged-in user, so one user can never reach another's connection.
-    return f"u{g.user_id}-{sid}"
-
-
-def parse_body(model: type[T]) -> T:
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict):
-        raise ValidationError("Request body must be a JSON object.")
-    try:
-        return model.model_validate(payload)
-    except PydanticValidationError as exc:
-        first = exc.errors()[0]
-        location = ".".join(str(p) for p in first.get("loc", ()))
-        raise ValidationError(f"{location}: {first.get('msg')}" if location else first.get("msg", "Invalid input"))
+    return f"u{claims['sub']}-{sid}"

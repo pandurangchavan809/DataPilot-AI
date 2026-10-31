@@ -72,7 +72,7 @@ class UserStore:
 
     @contextmanager
     def _conn(self):
-        # One short-lived connection per operation: safe across gunicorn threads.
+        # One short-lived connection per operation: safe across server threads.
         db = sqlite3.connect(self._path, timeout=10)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys = ON")

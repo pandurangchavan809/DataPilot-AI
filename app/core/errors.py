@@ -38,6 +38,14 @@ class ConflictError(AppError):
     code = "conflict"
 
 
+class RateLimitError(AppError):
+    status_code = 429
+    code = "rate_limited"
+
+    def __init__(self, message: str = "Too many requests, slow down a little."):
+        super().__init__(message)
+
+
 class NotConnectedError(AppError):
     status_code = 409
     code = "not_connected"

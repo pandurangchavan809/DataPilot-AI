@@ -271,7 +271,7 @@ def guard_node(state: AgentState) -> dict:
 
 LangGraph merges that into the state. With no custom reducer, a new value replaces the old one.
 
-**Follow-up: why not global variables?** Gunicorn handles many requests across threads, so shared
+**Follow-up: why not global variables?** The server handles many requests across threads, so shared
 globals would mix users' data. Each run gets its own state.
 
 ### Q2. How does the retry loop work?
@@ -303,7 +303,7 @@ for text in stream_insight(...):
     emit(("token", {"text": text}))
 ```
 
-`run()` reads them with `GRAPH.stream(..., stream_mode="custom")` and yields them to Flask, which sends
+`run()` reads them with `GRAPH.stream(..., stream_mode="custom")` and yields them to FastAPI, which sends
 them as SSE. So a word reaches the user while the node is still running, not after it finishes.
 
 **Follow-up: how do you know it's really live?** A test uses a fake model that waits 0.3 s between words,

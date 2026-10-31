@@ -6,26 +6,26 @@ from app.db.executor import execute_readonly
 
 
 def test_health(client):
-    assert client.get("/api/health").json["status"] == "ok"
+    assert client.get("/api/health").json()["status"] == "ok"
 
 
 def test_demo_connection_lifecycle(client, headers):
-    assert client.get("/api/connections/current", headers=headers).json["connection"] is None
+    assert client.get("/api/connections/current", headers=headers).json()["connection"] is None
 
     resp = client.post("/api/connections", json={"type": "sqlite_demo"}, headers=headers)
     assert resp.status_code == 201
-    tables = {t["name"] for t in resp.json["schema"]["tables"]}
+    tables = {t["name"] for t in resp.json()["schema"]["tables"]}
     assert {"countries", "economy_stats"} <= tables
 
-    assert client.get("/api/connections/current", headers=headers).json["connection"]["type"] == "sqlite_demo"
+    assert client.get("/api/connections/current", headers=headers).json()["connection"]["type"] == "sqlite_demo"
     assert client.delete("/api/connections/current", headers=headers).status_code == 204
-    assert client.get("/api/connections/current", headers=headers).json["connection"] is None
+    assert client.get("/api/connections/current", headers=headers).json()["connection"] is None
 
 
 def test_chat_requires_connection(client, headers):
     resp = client.post("/api/chat", json={"message": "hi"}, headers=headers)
     assert resp.status_code == 409
-    assert resp.json["error"]["code"] == "not_connected"
+    assert resp.json()["error"]["code"] == "not_connected"
 
 
 def test_session_header_required(client, auth_header):

@@ -2,7 +2,7 @@
 
 Credentials are Fernet-encrypted before storage and expire with the session
 TTL. The in-memory backend suits a single process. Use Redis when running
-multiple gunicorn workers or replicas.
+multiple uvicorn workers or replicas.
 """
 
 from __future__ import annotations

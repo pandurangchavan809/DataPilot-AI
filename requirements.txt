@@ -1,6 +1,7 @@
-flask>=3.0,<4
-flask-cors>=5.0
-flask-limiter>=3.8
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30
+limits>=3.13
+werkzeug>=3.0
 pydantic>=2.7,<3
 pydantic-settings>=2.7
 python-dotenv>=1.0
@@ -13,4 +14,3 @@ pymysql>=1.1
 cryptography>=42
 PyJWT>=2.8
 redis>=5.0
-gunicorn>=22; platform_system != "Windows"

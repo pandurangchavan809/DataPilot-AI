@@ -49,9 +49,9 @@ pipeline of AI agents writes SQL, verifies that it is read-only, runs it, and st
 │ Serves built SPA files · proxies /api (buffering OFF)     │
 └───────────────┬───────────────────────────────────────────┘
                 ▼
-┌──────────────── gunicorn (gthread) → Flask app ───────────┐
-│ API layer: meta · connections · chat (blueprints)         │
-│ Cross-cutting: CORS · rate limiter · ProxyFix · errors ·  │
+┌────────────────── uvicorn → FastAPI app ──────────────────┐
+│ API layer: auth · meta · connections · chat (routers)     │
+│ Cross-cutting: CORS · rate limiter · client IP · errors · │
 │                JSON logging                               │
 │                                                           │
 │ Orchestrator (LangGraph state graph)                      │
@@ -73,9 +73,9 @@ pipeline of AI agents writes SQL, verifies that it is read-only, runs it, and st
 | DB | `app/db/` | Connectors, SQL guard, executor, schema introspection, session store, connection manager |
 | Core | `app/core/` | Errors, logging, JSON serialization |
 | Config | `app/config.py` | All settings, loaded from the root `.env` |
-| Wiring | `app/services.py`, `__init__.py` | Builds the shared services once and creates the Flask app |
+| Wiring | `app/services.py`, `__init__.py` | Builds the shared services once and creates the FastAPI app |
 
-Dependencies point one way: **API → Agents → (LLM, DB) → Core**. Agents never import Flask, and
+Dependencies point one way: **API → Agents → (LLM, DB) → Core**. Agents never import FastAPI, and
 the DB layer knows nothing about LLMs. Each part can be tested and replaced on its own.
 
 ---
@@ -275,10 +275,11 @@ can serve any request.
 | Technology | What it does here | Why it was chosen |
 |---|---|---|
 | **Python 3.11** | Backend language | Strongest ecosystem for LLM SDKs, SQL tooling and data handling. 3.11 is fast and widely supported. |
-| **Flask 3** | HTTP API: app factory, blueprints, streaming responses | The workload is synchronous (blocking DB drivers, generator-based streaming). Flask with threaded workers handles this simply. It's small, mature and easy to reason about. FastAPI's async model would need thread-pool wrappers around every blocking driver. |
-| **flask-cors** | Allows only the configured frontend origins to call the API | Needed when the frontend and API are on different origins (local dev, or separate hosting). The allow-list comes from `CORS_ORIGINS`. |
-| **flask-limiter** | Per-IP rate limits on chat and connect endpoints | Protects LLM spend and user databases from abuse. It's keyed by IP rather than session id, because session ids are client-generated and could be rotated to dodge the limit. The counters can live in Redis. |
-| **Werkzeug ProxyFix** | Recovers the real client IP and scheme behind nginx or a load balancer | Without it, every request looks like it comes from the proxy, and rate limiting breaks. |
+| **FastAPI** | HTTP API: routers, dependency injection, request validation, streaming responses, automatic docs at `/api/docs` | Validates requests from type hints, and `Depends` keeps login and rate limits in one place. Routes are plain `def` because the DB and LLM calls block, so FastAPI runs them on its thread pool and the event loop stays free. |
+| **CORSMiddleware** | Allows only the configured frontend origins to call the API | Needed when the frontend and API are on different origins (local dev, or separate hosting). The allow-list comes from `CORS_ORIGINS`. |
+| **limits** | Per-IP rate limits, applied by a FastAPI dependency in `api/deps.py` | Protects LLM spend and user databases from abuse. It's keyed by IP rather than session id, because session ids are client-generated and could be rotated to dodge the limit. The counters can live in Redis. |
+| **`client_ip()` + `PROXY_FIX_HOPS`** | Recovers the real client IP behind nginx or a load balancer | Without it, every request looks like it comes from the proxy, and rate limiting breaks. It counts from the right of `X-Forwarded-For`, because a client can fake the left side. |
+| **Werkzeug** | `generate_password_hash` and `check_password_hash` only | Salted scrypt hashing. Kept so that existing accounts still work. |
 | **Pydantic v2** | Validates request bodies and the connection config | Typed, declarative validation with clear error messages, the same benefit FastAPI gets from it. |
 | **pydantic-settings + python-dotenv** | Loads and validates all configuration from `.env` and environment variables | One typed, validated place for configuration. The app fails fast on bad config, and real environment variables override `.env` in Docker or on hosting platforms. |
 | **LangGraph** | Runs the agents as a state graph: nodes for each stage, conditional edges for routing and the SQL retry loop | Makes the flow and retries explicit and easy to draw. Its custom stream mode sends each event as it happens, which SSE needs. |
@@ -290,7 +291,7 @@ can serve any request.
 | **SQLite** (stdlib) | Bundled demo database (`data/demo.db`, 5 tables, top 50 countries) | Needs no server, so anyone can try the app instantly. Opened read-only like any other database. |
 | **cryptography (Fernet)** | Encrypts database credentials in the session store | Authenticated symmetric encryption that's hard to misuse. The key is derived from `SECRET_KEY`, so a leaked Redis dump doesn't reveal passwords. |
 | **Redis** | Shared session store (with TTL) and rate-limit counters in production | See section 9. |
-| **gunicorn** (gthread workers) | Production WSGI server | Several processes for CPU and fault isolation. Threads make long-lived SSE streams cheap, because a waiting stream holds a thread rather than a process. The 180 s timeout leaves room for slow LLM answers. |
+| **uvicorn** | Production ASGI server | Runs the FastAPI app and supports streaming responses. `WEB_CONCURRENCY` sets the number of processes. It has no request timeout like gunicorn had, but each LLM call has its own 60 s timeout, and each SQL query 15 s. |
 | **pytest** | Tests for the guard matrix, LLM output parsing, the API lifecycle and DB-level write rejection | Covers the parts that must never break, without needing an LLM key. |
 
 ### Frontend
@@ -312,7 +313,7 @@ can serve any request.
 | Technology | What it does here | Why it was chosen |
 |---|---|---|
 | **Docker** | One image each for the backend (`python:3.11-slim`, non-root user, health check) and the frontend (Node build stage → nginx) | The same artifact runs on a laptop, a VM or Kubernetes. Multi-stage builds keep images small. |
-| **nginx** | Serves the built SPA, caches hashed assets for a year, proxies `/api` to gunicorn | Fast static serving. Same-origin `/api` means no CORS in production. `proxy_buffering off` is **essential** for SSE; without it nginx holds back the tokens and the answer arrives all at once. |
+| **nginx** | Serves the built SPA, caches hashed assets for a year, proxies `/api` to uvicorn | Fast static serving. Same-origin `/api` means no CORS in production. `proxy_buffering off` is **essential** for SSE; without it nginx holds back the tokens and the answer arrives all at once. |
 | **Docker Compose** | Runs frontend, backend and Redis together with one command | It sits at the repo root because it spans both service folders. In production each image can be deployed separately. |
 
 ---
@@ -324,10 +325,10 @@ can serve any request.
 1. **Session store.** Holds each session's encrypted connection config and a `connected_at`
    timestamp under a key with a TTL. Every access renews the TTL (a sliding expiry), and idle sessions expire
    automatically with nothing to clean up.
-2. **Rate-limit storage.** flask-limiter keeps per-IP request counters in Redis (a separate
+2. **Rate-limit storage.** The `limits` library keeps per-IP request counters in Redis (a separate
    database number), so the limit applies across **all** workers and containers.
 
-**Why it's needed.** In production there are several gunicorn processes, and possibly several
+**Why it's needed.** In production there are several uvicorn processes, and possibly several
 containers. In-memory state is private to one process. Without shared storage, a user who
 connected through worker A would appear "not connected" on worker B, and each worker would count
 rate limits separately, multiplying the effective limit.
@@ -336,7 +337,7 @@ rate limits separately, multiplying the effective limit.
 
 - Built-in key expiry (TTL), which is exactly what session-only state needs.
 - Very fast in-memory reads; the session lookup happens on every request.
-- Supported natively by flask-limiter.
+- Supported natively by the `limits` library.
 - Simple to run (`redis:7-alpine`) and available as a managed service on every cloud.
 - In Compose it runs with persistence off (`--save "" --appendonly no`). Sessions are meant to be
   short-lived, so nothing is written to disk.
@@ -394,13 +395,13 @@ any log aggregator.
 
 ```
 docker compose up --build   →   http://localhost:8080
-  frontend (nginx :80 → host :8080) ──/api──▶ backend (gunicorn :5000) ──▶ redis
+  frontend (nginx :80 → host :8080) ──/api──▶ backend (uvicorn :5000) ──▶ redis
 ```
 
 - **Horizontal scaling:** add backend replicas behind nginx or a load balancer. Redis keeps
   sessions and rate limits consistent across them.
-- **Vertical tuning:** `WEB_CONCURRENCY` (processes) and `GUNICORN_THREADS` (threads per process,
-  roughly the number of concurrent streams).
+- **Vertical tuning:** `WEB_CONCURRENCY` sets the number of uvicorn processes. Each one runs ordinary
+  routes on a thread pool, and each streamed answer on a thread of its own.
 - **Split hosting:** the frontend can go on a static host (Vercel, Netlify) with
   `VITE_API_BASE_URL` set, the backend on Render, Railway or Kubernetes, with managed Redis and
   `CORS_ORIGINS` set to the frontend URL.

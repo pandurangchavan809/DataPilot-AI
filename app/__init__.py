@@ -1,23 +1,26 @@
-"""DataPilot AI backend: Flask application factory."""
+"""DataPilot AI backend: FastAPI application factory."""
 
 from __future__ import annotations
 
 import logging
+from http import HTTPStatus
 
-from flask import Flask, jsonify
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from werkzeug.exceptions import HTTPException
-from werkzeug.middleware.proxy_fix import ProxyFix
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
 
 from .api import register_api
 from .config import Settings, get_settings
 from .core.errors import AppError
 from .core.logging import configure_logging
+from .core.middleware import BodySizeLimitMiddleware, CatchUnhandledErrorsMiddleware
 from .services import Services
 
 logger = logging.getLogger(__name__)
+
+MAX_BODY_BYTES = 1 * 1024 * 1024
 
 
 def _ensure_demo_db(settings: Settings) -> None:
@@ -28,43 +31,57 @@ def _ensure_demo_db(settings: Settings) -> None:
         logger.info("Seeded demo database at %s", settings.demo_db_path)
 
 
-def create_app(settings: Settings | None = None) -> Flask:
+def _error(status_code: int, code: str, message: str) -> JSONResponse:
+    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status_code)
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_logs=settings.is_production)
 
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY=settings.secret_key, JSON_SORT_KEYS=False, MAX_CONTENT_LENGTH=1 * 1024 * 1024)
-    if settings.proxy_fix_hops:
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=settings.proxy_fix_hops, x_proto=settings.proxy_fix_hops)
+    # Docs live under /api so they also work behind the nginx /api proxy.
+    app = FastAPI(
+        title=settings.app_name,
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+    )
 
-    CORS(
-        app,
-        resources={r"/api/*": {"origins": settings.cors_origins}},
+    # The last middleware added runs first. CORS stays outermost, so errors keep their CORS headers.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
+    app.add_middleware(CatchUnhandledErrorsMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
         allow_headers=["Content-Type", "X-Session-Id", "Authorization"],
-        methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         max_age=600,
     )
-    limiter = Limiter(get_remote_address, app=app, storage_uri=settings.rate_limit_storage_uri)
 
     _ensure_demo_db(settings)
     svc = Services.build(settings)
     svc.auth.seed_demo_user()
-    app.extensions["datapilot"] = svc
-    register_api(app, limiter, settings.rate_limit, settings.auth_rate_limit)
+    app.state.services = svc
+    register_api(app)
 
-    @app.errorhandler(AppError)
-    def _app_error(exc: AppError):
-        return jsonify(exc.to_dict()), exc.status_code
+    @app.exception_handler(AppError)
+    def _app_error(_request: Request, exc: AppError):
+        return JSONResponse(exc.to_dict(), status_code=exc.status_code)
 
-    @app.errorhandler(HTTPException)
-    def _http_error(exc: HTTPException):
-        code = (exc.name or "error").lower().replace(" ", "_")
-        return jsonify({"error": {"code": code, "message": exc.description}}), exc.code
+    @app.exception_handler(HTTPException)
+    def _http_error(_request: Request, exc: HTTPException):
+        code = HTTPStatus(exc.status_code).phrase.lower().replace(" ", "_")
+        return _error(exc.status_code, code, str(exc.detail))
 
-    @app.errorhandler(Exception)
-    def _unhandled(exc: Exception):
-        logger.exception("Unhandled error")
-        return jsonify({"error": {"code": "internal_error", "message": "Internal server error."}}), 500
+    @app.exception_handler(RequestValidationError)
+    def _validation_error(_request: Request, exc: RequestValidationError):
+        # Only the location and message: FastAPI's default reply echoes the input, which could hold a password.
+        first = exc.errors()[0]
+        if first.get("type") == "json_invalid":
+            return _error(400, "validation_error", "Request body must be valid JSON.")
+        location = ".".join(str(p) for p in first.get("loc", ()) if p != "body")
+        message = first.get("msg", "Invalid input")
+        return _error(400, "validation_error", f"{location}: {message}" if location else message)
 
     logger.info("%s started (env=%s)", settings.app_name, settings.app_env)
     return app

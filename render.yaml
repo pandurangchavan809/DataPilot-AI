@@ -1,0 +1,39 @@
+# Render Blueprint for the backend: Dashboard → New + → Blueprint → pick this repo.
+# "sync: false" values are secrets or URLs. Render asks for them once and never reads them from git.
+services:
+  - type: web
+    name: datapilot-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn asgi:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_ENV
+        value: production
+      - key: PROXY_FIX_HOPS
+        value: "1"
+      - key: WEB_CONCURRENCY # one process while sessions are in memory (deployment.md 1.6)
+        value: "1"
+      - key: SECRET_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: NEBIUS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NEBIUS_MODELS
+        value: nvidia/Nemotron-3_5-Lightning,Qwen/Qwen3-235B-A22B-Instruct-2507
+      - key: GEMINI_MODELS
+        value: gemini-3.5-flash
+      - key: OPENAI_MODELS
+        value: gpt-4.1
+      - key: LLM_PRIMARY
+        value: nebius:nvidia/Nemotron-3_5-Lightning
+      - key: LLM_SECONDARY
+        value: gemini:gemini-3.5-flash

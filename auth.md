@@ -84,7 +84,7 @@ number. It then stores the hash and logs the user in. A duplicate email returns 
 
 ```
 Authorization: Bearer <access>
-  → require_auth() (before_request on the protected blueprints)
+  → require_auth() (a FastAPI dependency on the protected routers)
   → jwt.decode(algorithms=["HS256"]) + type == "access"
   → g.user_id = sub      → the endpoint runs
   → expired: 401 token_expired      bad/missing: 401 unauthorized / invalid_token
@@ -214,13 +214,13 @@ The refresh token is revoked in the database, so no new access tokens can be mad
 access token stays valid for at most 15 minutes. The frontend deletes it right away. For instant
 revocation you'd keep a deny-list of access `jti`s (for example in Redis).
 
-**Q7. How do you protect routes in Flask?**
-A `before_request` hook (`require_auth`) on the protected blueprints. It reads the Bearer token,
-verifies it and puts the user id in `flask.g`. Health and auth endpoints are on blueprints without
+**Q7. How do you protect routes in FastAPI?**
+With a dependency. `require_auth` is added with `Depends` to the protected routers. It reads the Bearer
+token, verifies it and returns the claims, and FastAPI won't run the route if it raises. Health and auth endpoints are on routers without
 the hook.
 
 **Q8. How did you stop brute-force attacks?**
-Flask-Limiter allows 10 auth requests per minute per IP, and scrypt hashing is deliberately slow. Every
+A rate-limit dependency (using the `limits` library) allows 10 auth requests per minute per IP, and scrypt hashing is deliberately slow. Every
 failed attempt is logged with its IP, so attacks are visible.
 
 **Q9. Why is the auth database separate from the demo database?**

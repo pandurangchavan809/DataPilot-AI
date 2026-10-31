@@ -28,13 +28,13 @@ A container shares the host's kernel and only packages the app layer (MBs, start
 
 | Use | How |
 |---|---|
-| **Run the full production-like stack locally** | `docker compose up --build` starts nginx (frontend), gunicorn (backend) and Redis together, which is what a real deployment looks like |
+| **Run the full production-like stack locally** | `docker compose up --build` starts nginx (frontend), uvicorn (backend) and Redis together, which is what a real deployment looks like |
 | **Same environment everywhere** | The backend always runs on `python:3.11-slim`, whatever OS you develop on |
 | **Deploy anywhere that runs containers** | Render (Runtime: Docker), Railway, Fly.io, AWS ECS, Google Cloud Run, Azure Container Apps, Kubernetes |
 | **Try Redis without installing it** | The `redis:7-alpine` image runs in one line |
 
 **Is Docker required?** No. On Render you can also deploy with plain Python (`pip install` +
-`gunicorn`), as `deployment.md` describes, and Vercel builds the frontend itself. Docker is the
+`uvicorn`), as `deployment.md` describes, and Vercel builds the frontend itself. Docker is the
 *portable* option, and the standard in most companies.
 
 ---
@@ -61,7 +61,7 @@ USER appuser                               # 6. do not run as root (security)
 
 EXPOSE 5000                                # 7. documents the port
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "...urlopen('http://127.0.0.1:5000/api/health')"
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]   # 8. start command
+CMD ["sh", "-c", "exec uvicorn asgi:app --host 0.0.0.0 --port ${PORT:-5000}"]   # 8. start command
 ```
 
 Why each choice matters:
@@ -82,8 +82,9 @@ Why each choice matters:
 7. **`EXPOSE`** is documentation only. Publishing a port happens with `-p` or Compose's `ports`.
 8. **`HEALTHCHECK`:** Docker calls `/api/health` every 30 s and marks the container
    `healthy` or `unhealthy`. Orchestrators use this to restart broken containers.
-9. **`CMD`:** gunicorn reads `gunicorn.conf.py` (threaded workers, `$PORT`, 180 s timeout) and
-   serves `wsgi:app`.
+9. **`CMD`:** uvicorn serves `asgi:app` on `$PORT` (5000 by default), and reads `WEB_CONCURRENCY` for
+   the number of worker processes. `sh -c` is there so `$PORT` gets filled in, and `exec` makes uvicorn
+   the main process, so it receives Docker's stop signal.
 
 ### 3.2 `.dockerignore` (repo root)
 
@@ -306,7 +307,7 @@ docker run --rm -p 5000:5000 --env-file .env datapilot-api
 **Q1. What is Docker and why did you use it?**
 > Docker packages an application with its runtime and dependencies into an image that runs the
 > same everywhere. I used it so the backend always runs on the same Python 3.11 environment, and
-> so the full stack (nginx, Flask with gunicorn, and Redis) starts with one command, the same way it
+> so the full stack (nginx, FastAPI with uvicorn, and Redis) starts with one command, the same way it
 > would in production.
 
 **Q2. Image vs container?**
@@ -320,7 +321,7 @@ docker run --rm -p 5000:5000 --env-file .env datapilot-api
 **Q4. Explain your backend Dockerfile.**
 > It starts from `python:3.11-slim` and copies `requirements.txt` first so the dependency layer is
 > cached, then copies the code. It runs as a non-root user, defines a health check on
-> `/api/health`, and starts gunicorn with threaded workers, which suit the long-lived streaming
+> `/api/health`, and starts uvicorn, which suits the long-lived streaming
 > responses.
 
 **Q5. Why copy `requirements.txt` before the rest of the code?**
@@ -359,12 +360,12 @@ docker run --rm -p 5000:5000 --env-file .env datapilot-api
 > reached directly from outside. That's a smaller attack surface.
 
 **Q13. Why Redis in the Compose setup?**
-> gunicorn runs several worker processes, and in-memory state isn't shared between them. Redis
+> Compose runs uvicorn with two worker processes, and in-memory state isn't shared between them. Redis
 > stores the encrypted session data and rate-limit counters, so any worker can serve any request.
 
-**Q14. Why gunicorn and not `python wsgi.py` in the container?**
-> Flask's built-in server is for development: one process, not hardened. gunicorn is a production
-> WSGI server with multiple workers, timeouts and graceful restarts.
+**Q14. Why `uvicorn` directly and not `python asgi.py` in the container?**
+> `python asgi.py` is for development: it turns on auto-reload, which watches files and restarts the
+> app. The `uvicorn` command gives a plain production process, with worker count set by `WEB_CONCURRENCY`.
 
 **Q15. Why run as a non-root user?**
 > Least privilege. If the app is compromised, the attacker doesn't get root inside the container,

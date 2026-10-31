@@ -1,7 +1,7 @@
 # DataPilot AI Interview Preparation
 
 A practical interview guide for **DataPilot AI** as it exists in this repository: an agentic,
-read-only natural-language analytics app with a Flask backend and a React + TypeScript frontend.
+read-only natural-language analytics app with a FastAPI backend and a React + TypeScript frontend.
 
 Use it to prepare answers for:
 
@@ -23,7 +23,7 @@ If the interviewer says, **"Tell me about your project"**:
 > read-only, and then the query runs. If it fails, the SQL agent sees the error and repairs its own
 > query. Finally a visualization agent picks a chart and an insight agent streams the answer. Users
 > can connect their own PostgreSQL or MySQL database, or try a bundled SQLite demo. Everything is
-> read-only, enforced in three independent layers. The backend is Flask with Server-Sent Events, the
+> read-only, enforced in three independent layers. The backend is FastAPI with Server-Sent Events, the
 > frontend is React, TypeScript and Tailwind, and the LLM layer supports Nebius (Nemotron), Gemini
 > and OpenAI with role-based routing and automatic fallback, all configured from `.env`.
 
@@ -53,7 +53,7 @@ Shorter version:
 - Multiple LLM providers and models, picked by role or chosen by the user in the UI
 - Session-only chats: nothing is stored server-side; credentials are encrypted and expire
 - Schema explorer, SQL viewer with copy, paginated result table with CSV export, dark mode, mobile layout
-- Production deployment: Docker, gunicorn, nginx, Redis, rate limiting, structured JSON logs
+- Production deployment: Docker, uvicorn, nginx, Redis, rate limiting, structured JSON logs
 
 ## 4. Architecture
 
@@ -61,7 +61,7 @@ Shorter version:
 
 > There are three tiers. The React frontend is a single-page chat app. It sends the question plus
 > the last few turns to `POST /api/chat` and reads back a Server-Sent Events stream: step updates,
-> the SQL, the result rows, a chart spec and the answer tokens. The Flask backend has an
+> the SQL, the result rows, a chart spec and the answer tokens. The FastAPI backend has an
 > orchestrator, a LangGraph state graph that runs the agents and yields events. Agents never talk
 > to an LLM SDK directly. They go through an LLM gateway that knows which model plays which role,
 > falls back to another provider on failure, and strips reasoning `<think>` blocks. Databases are
@@ -69,7 +69,7 @@ Shorter version:
 > lives in memory or Redis, so the backend is stateless and can scale horizontally.
 
 ```
-React (chat, trace, table, chart)  ──SSE──▶  Flask API
+React (chat, trace, table, chart)  ──SSE──▶  FastAPI
                                               └─ Orchestrator
                                                   Router → Schema → SQL ⇄ Guard ⇄ Executor → Viz → Insight
                                               └─ LLM gateway (roles, fallback)  → Nebius / Gemini / OpenAI
@@ -217,15 +217,14 @@ React (chat, trace, table, chart)  ──SSE──▶  Flask API
 ### Q12. How did you make it production-ready rather than a demo?
 
 > - Configuration is centralized in `.env` and validated with `pydantic-settings`.
-> - A Flask app factory with blueprints, plus a typed error hierarchy that maps to HTTP codes and
+> - A FastAPI app factory with routers and dependencies, plus a typed error hierarchy that maps to HTTP codes and
 >   stable error codes.
 > - Request validation with Pydantic, and request size and history limits.
-> - Rate limiting per client IP with flask-limiter (Redis-backed in production), and `ProxyFix` for
->   correct client IPs behind nginx.
+> - Rate limiting per client IP with the `limits` library (Redis-backed in production), reading the
+>   real client IP safely from `X-Forwarded-For` behind nginx.
 > - CORS restricted to configured origins.
 > - Structured JSON logging.
-> - gunicorn with threaded workers (cheap for long SSE streams) and nginx with proxy buffering off
->   for SSE.
+> - uvicorn, with each streamed answer on its own thread, and nginx with proxy buffering off for SSE.
 > - Dockerfiles for both services and a compose file with Redis.
 > - Tests for the guard, the LLM parsing and the API lifecycle.
 
@@ -297,20 +296,24 @@ Full notes are in [auth.md](auth.md).
 
 ## 7. Why this tech stack?
 
-### Why Python and Flask?
+### Why Python and FastAPI?
 
-> Python has the best ecosystem for LLMs and databases (SQLAlchemy, sqlglot, provider SDKs). I chose
-> Flask over FastAPI because the request flow is synchronous: blocking database drivers and
-> streaming generators. Flask with gunicorn's threaded workers handles that simply and predictably.
-> Validation still uses Pydantic, so I didn't lose typed request models. Flask's app factory and
-> blueprints keep it modular.
+> Python has the best ecosystem for LLMs and databases (SQLAlchemy, sqlglot, provider SDKs). FastAPI
+> gives me request validation from type hints, dependency injection for login and rate limits, and
+> automatic API docs at `/api/docs`.
 
-**"Why not FastAPI?"**
+**"The original version was Flask. Why move?"**
 
-> FastAPI is great for async I/O. But my database drivers are synchronous, so I'd either block the
-> event loop or wrap everything in thread pools. With Flask, gthread workers and SSE generators, the
-> concurrency model is explicit and easy to reason about. The trade-off is that I wrote small helpers
-> for body parsing and errors myself.
+> Mainly validation, dependencies and docs. Login and rate limits became dependencies on each router.
+> To be honest about it, it isn't faster for my workload: the time goes to LLM calls, and FastAPI doesn't
+> change those.
+
+**"Are you using async?"**
+
+> Mostly not, on purpose. My database drivers and LLM calls block, so a blocking call inside `async def`
+> would freeze every other request. So routes are plain `def`, and FastAPI runs them on a thread pool.
+> The one async part is the chat stream: the agents run on their own thread and pass events through a
+> queue to an async generator. That also lets me stop the run when the client disconnects, which saves LLM cost.
 
 ### Why React, TypeScript and Tailwind (instead of Streamlit)?
 
@@ -349,7 +352,7 @@ Full notes are in [auth.md](auth.md).
 
 ### Why Redis?
 
-> Production has several gunicorn workers and possibly several containers. Sessions and rate-limit
+> Production has several uvicorn workers and possibly several containers. Sessions and rate-limit
 > counters must be shared across them. Redis does both and supports TTL-based expiry natively.
 
 ### Why SQLite for the demo?
@@ -362,7 +365,7 @@ Full notes are in [auth.md](auth.md).
 ### Short "why this stack" answer
 
 > I optimized for safety, clarity and real-world deployability: Python for the AI and database
-> ecosystem, Flask for a simple synchronous streaming model, sqlglot and SQLAlchemy for safe
+> ecosystem, FastAPI for validation, dependency injection and automatic docs, sqlglot and SQLAlchemy for safe
 > multi-dialect SQL, an OpenAI-compatible gateway so models are swappable from `.env`, and React with
 > TypeScript for a production-grade chat UI.
 
@@ -415,7 +418,7 @@ Full notes are in [auth.md](auth.md).
 
 ### Q2. Why is the backend at the repo root and the frontend in a folder?
 
-> I'm mainly a backend engineer, so the repo is backend-first: the Flask app, its `.env`,
+> I'm mainly a backend engineer, so the repo is backend-first: the FastAPI app, its `.env`,
 > `requirements.txt` and `Dockerfile` sit at the root, with one `.gitignore` covering everything. The
 > React app lives in `frontend/` and is deployed separately. It's self-contained, so it can be copied
 > or deployed on its own, and it reaches the backend through `VITE_API_BASE_URL`.

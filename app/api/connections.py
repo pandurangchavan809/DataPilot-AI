@@ -2,40 +2,35 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify
+from fastapi import APIRouter, Depends
 
-from ..services import services
-from .deps import parse_body, require_auth, session_id
+from ..services import Services, get_services
+from .deps import rate_limited, session_id
 from .schemas import ConnectRequest
 
-bp = Blueprint("connections", __name__)
-bp.before_request(require_auth)
+router = APIRouter(tags=["connections"], dependencies=[Depends(rate_limited("rate_limit"))])
 
 
 def _payload(active) -> dict:
     return {"connection": active.config.public_dict(), "schema": active.schema.to_dict()}
 
 
-@bp.post("/connections")
-def connect():
-    config = parse_body(ConnectRequest)
-    active = services().connections.connect(session_id(), config)
-    return jsonify(_payload(active)), 201
+@router.post("/connections", status_code=201)
+def connect(config: ConnectRequest, sid: str = Depends(session_id), svc: Services = Depends(get_services)):
+    return _payload(svc.connections.connect(sid, config))
 
 
-@bp.get("/connections/current")
-def current():
-    active = services().connections.peek(session_id())
-    return jsonify(_payload(active) if active else {"connection": None, "schema": None})
+@router.get("/connections/current")
+def current(sid: str = Depends(session_id), svc: Services = Depends(get_services)):
+    active = svc.connections.peek(sid)
+    return _payload(active) if active else {"connection": None, "schema": None}
 
 
-@bp.delete("/connections/current")
-def disconnect():
-    services().connections.disconnect(session_id())
-    return "", 204
+@router.delete("/connections/current", status_code=204)
+def disconnect(sid: str = Depends(session_id), svc: Services = Depends(get_services)) -> None:
+    svc.connections.disconnect(sid)
 
 
-@bp.post("/schema/refresh")
-def refresh_schema():
-    active = services().connections.refresh_schema(session_id())
-    return jsonify(_payload(active))
+@router.post("/schema/refresh")
+def refresh_schema(sid: str = Depends(session_id), svc: Services = Depends(get_services)):
+    return _payload(svc.connections.refresh_schema(sid))

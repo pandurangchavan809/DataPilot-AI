@@ -9,6 +9,8 @@ import uuid
 
 import pytest
 
+from fastapi.testclient import TestClient
+
 from app import create_app
 from app.config import Settings
 
@@ -25,14 +27,14 @@ def settings(tmp_path):
 
 @pytest.fixture()
 def client(settings):
-    return create_app(settings).test_client()
+    return TestClient(create_app(settings))
 
 
 @pytest.fixture()
 def auth_header(client):
     """Logs in as the seeded demo user."""
     resp = client.post("/api/auth/login", json={"email": "user", "password": "User@1234"})
-    return {"Authorization": f"Bearer {resp.json['access_token']}"}
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
 @pytest.fixture()

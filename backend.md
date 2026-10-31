@@ -1,6 +1,6 @@
 # DataPilot AI Backend Guide
 
-A file-by-file tour of the Flask backend: what each file does, its important functions, and why it
+A file-by-file tour of the FastAPI backend: what each file does, its important functions, and why it
 exists. Read it top to bottom once, then use it as a reference.
 
 > Big picture: the browser sends a question, `app/api/chat.py` receives it, the **orchestrator** runs
@@ -8,7 +8,7 @@ exists. Read it top to bottom once, then use it as a reference.
 > read-only SQL, and every step streams back to the browser as Server-Sent Events.
 
 ```
-wsgi.py ─▶ app/__init__.py (create_app) ─▶ app/api/*        (HTTP routes)
+asgi.py ─▶ app/__init__.py (create_app) ─▶ app/api/*        (HTTP routes)
                                              │
                                              ▼
                                    app/agents/orchestrator.py ─▶ router · schema · sql · viz · insight
@@ -21,53 +21,33 @@ wsgi.py ─▶ app/__init__.py (create_app) ─▶ app/api/*        (HTTP routes
 ```
 
 **Dependency rule:** `api → agents → (llm, db) → core`. Lower layers never import higher ones.
-For example, `db/` knows nothing about Flask or LLMs, so each layer can be tested and changed on
+For example, `db/` knows nothing about FastAPI or LLMs, so each layer can be tested and changed on
 its own.
 
 ---
 
 ## 1. Root files
 
-### `wsgi.py`: the entry point
+### `asgi.py`: the entry point
 
 ```python
 from app import create_app
-app = create_app()          # the Flask application object
+app = create_app()          # the FastAPI application object
 
-if __name__ == "__main__":  # only when you run: python wsgi.py
-    app.run(host="0.0.0.0", port=5000, debug=..., threaded=True)
+if __name__ == "__main__":  # only when you run: python asgi.py
+    uvicorn.run("asgi:app", host="0.0.0.0", port=5000, reload=...)
 ```
 
-- **What "WSGI" means:** *Web Server Gateway Interface*. It's the standard contract between a
-  Python web app and a web server: the server calls an `app` object for every request.
-  `wsgi.py` exists to expose that object.
-- **Local dev:** `python wsgi.py` starts Flask's built-in development server, with auto-reload and
-  debug mode.
-- **Production:** `gunicorn -c gunicorn.conf.py wsgi:app` means *"import the module `wsgi` and use
-  the variable `app` inside it"*. Flask's dev server is single-purpose and not built for real
-  traffic; gunicorn is.
+- **What "ASGI" means:** *Asynchronous Server Gateway Interface*. It's the standard contract between
+  a Python web app and a web server, like WSGI but with async and streaming support. `asgi.py`
+  exists to expose the `app` object.
+- **Local dev:** `python asgi.py` starts uvicorn with auto-reload.
+- **Production:** `uvicorn asgi:app --host 0.0.0.0 --port $PORT` means *"import the module `asgi` and
+  use the variable `app` inside it"*. `WEB_CONCURRENCY` sets the number of worker processes.
 
-**Why not rename it to `app.py`?** Because the folder `app/` is a Python package with the same
-name. When both exist, Python's import system picks the **package** (`app/__init__.py`) and
-silently ignores `app.py`. I tested this: `import app` loaded `app/__init__.py`, and
-`hasattr(app, "app")` was `False`. So `gunicorn app:app` would fail with *"Failed to find attribute
-'app' in 'app'"*. Other safe names are `main.py`, `run.py` and `server.py`, but `wsgi.py` is the
-standard convention (Django generates the same file), so anyone reading the repo knows what it is.
-
-### `gunicorn.conf.py`: production server settings
-
-| Setting | Value | Why |
-|---|---|---|
-| `bind` | `0.0.0.0:$PORT` | Listens on the port Render, Docker or a host gives it (default 5000) |
-| `worker_class` | `gthread` | Threaded workers. A streamed answer can stay open for 10–60 s, and a thread waiting on the LLM is cheap. |
-| `workers` | `WEB_CONCURRENCY` or min(4, CPUs) | Processes. Use **1** with in-memory sessions, more with Redis. |
-| `threads` | `GUNICORN_THREADS` or 8 | Concurrent requests per process |
-| `timeout` | 180 s | Long LLM answers must not be killed mid-stream |
-| `accesslog` / `errorlog` | `-` | Log to stdout, which Docker and Render collect |
-
-The name `gunicorn.conf.py` is gunicorn's **default config filename**. Gunicorn even loads it
-automatically from the working directory, and `-c` just makes that explicit. It's a Python file, so
-settings can read environment variables.
+**Why not name it `app.py`?** Because the folder `app/` is a Python package with the same name. When
+both exist, Python's import system picks the **package** and silently ignores `app.py`, so `uvicorn
+app:app` would fail. Other safe names are `main.py`, `run.py` and `server.py`.
 
 ### Other root files
 
@@ -85,22 +65,28 @@ settings can read environment variables.
 
 ### `app/__init__.py`: the application factory
 
-**`create_app(settings=None) -> Flask`** builds and wires the whole app:
+**`create_app(settings=None) -> FastAPI`** builds and wires the whole app:
 
 1. `configure_logging`: JSON logs in production, readable text in development.
-2. Flask config: `MAX_CONTENT_LENGTH` = 1 MB (rejects huge requests).
-3. **ProxyFix** (only if `PROXY_FIX_HOPS` > 0): trusts the `X-Forwarded-For` header from Render or
-   nginx, so the real client IP is known.
-4. **CORS**: only `CORS_ORIGINS` may call `/api/*`, with headers `Content-Type` and `X-Session-Id`.
-5. **Limiter**: rate limits keyed by client IP.
-6. `_ensure_demo_db`: creates `data/demo.db` if it's missing.
-7. `Services.build`: creates the shared services once.
-8. `register_api`: mounts all routes under `/api`.
-9. **Error handlers**: `AppError` returns its own status and code, `HTTPException` returns JSON, and
-   any other exception is logged and returns a generic 500 that hides internals.
+2. `FastAPI(...)`: docs at `/api/docs`, so they also work behind the nginx `/api` proxy.
+3. **Middleware**, from innermost to outermost:
+   - `BodySizeLimitMiddleware`: rejects bodies over 1 MB.
+   - `CatchUnhandledErrorsMiddleware`: logs unexpected errors and returns a generic 500 that hides internals.
+   - **CORS**: only `CORS_ORIGINS` may call the API, with headers `Content-Type`, `X-Session-Id` and `Authorization`.
+4. `_ensure_demo_db`: creates `data/demo.db` if it's missing.
+5. `Services.build`: creates the shared services once, stored in `app.state`.
+6. `register_api`: mounts all routes.
+7. **Error handlers**: `AppError` returns its own status and code, `HTTPException` returns JSON, and
+   validation errors return a 400 in the same format, without echoing the input, which could hold a password.
 
 *Why a factory?* Tests can call `create_app(test_settings)` to get a fresh app with a temporary
-database. The factory pattern is Flask's recommended structure.
+database.
+
+*Why a custom middleware for 500s?* FastAPI's own handler for `Exception` runs outside the CORS
+middleware, so the browser would report a CORS failure instead of the real error.
+
+*Where's the rate limiter?* `app/core/rate_limit.py` wraps the `limits` library, and `rate_limited()` in
+`api/deps.py` applies it to each router. Counters live in memory, or in Redis when `RATE_LIMIT_STORAGE_URI` is set.
 
 ### `app/config.py`: all settings in one place
 
@@ -118,8 +104,8 @@ database. The factory pattern is Flask's recommended structure.
 ### `app/services.py`: the service container
 
 **`Services`** holds the long-lived objects: `settings`, `registry` (LLM providers), `llm`
-(gateway) and `connections` (DB manager). `Services.build()` creates them once per process, and
-**`services()`** fetches them inside a request.
+(gateway), `connections` (DB manager), `auth` and `limiter`. `Services.build()` creates them once per
+process and stores them in `app.state`, and routes get them with `Depends(get_services)`.
 
 *Why?* Building OpenAI clients and connection pools per request would be slow. This also keeps
 wiring in one place instead of global variables scattered across modules.
@@ -132,7 +118,8 @@ The thin layer: validate the input, call a service, return JSON or a stream. No 
 
 | File | Endpoints / functions | What it does |
 |---|---|---|
-| `__init__.py` | `register_api(app, limiter, rate_limit, auth_rate_limit)` | Registers the blueprints under `/api` (auth under `/api/auth`). Applies the rate limit to `chat` and `connections`, and a stricter one (`10/minute`) to `auth` against password guessing. |
+| `__init__.py` | `register_api(app)` | Mounts the routers under `/api` (auth under `/api/auth`) |
+| | `rate_limited(setting)` in `deps.py` | A dependency on the `chat`, `connections` and `auth` routers. `auth` has the stricter limit (`10/minute`) against password guessing. |
 | `auth.py` | `POST /api/auth/signup`, `/login` | Create an account / check the password, then return an access + refresh token pair |
 | | `POST /api/auth/refresh`, `/logout` | Rotate the refresh token / revoke it |
 | | `GET /api/auth/me` | The logged-in user |
@@ -143,9 +130,9 @@ The thin layer: validate the input, call a service, return JSON or a stream. No 
 | | `DELETE /api/connections/current` | Disconnect, dispose the engine, delete the session data |
 | | `POST /api/schema/refresh` | Re-read the schema after the database changed |
 | `chat.py` | `POST /api/chat` | **The main endpoint.** See below. |
-| `deps.py` | `require_auth()` | Runs before every request on the `meta_private`, `connections` and `chat` blueprints. Reads `Authorization: Bearer …`, verifies the JWT, and puts the user id in `flask.g`. Missing or invalid → 401. |
+| `deps.py` | `require_auth()` | A dependency on the private `meta` router and on the routes that use `session_id()`. Reads `Authorization: Bearer …`, verifies the JWT, and returns its claims. Missing or invalid → 401. |
 | | `session_id()` | Reads the `X-Session-Id` header, validates the format (16–64 chars of letters, digits and dashes) and prefixes it with the user id (`u7-<id>`), so one user can never reach another user's DB connection |
-| | `parse_body(Model)` | Parses JSON into a Pydantic model; bad input gives a clean 400 |
+| | `client_ip(request, hops)` | The real client IP behind proxies, counted from the right of `X-Forwarded-For`, since a client can fake the left side |
 | `schemas.py` | `ChatRequest`, `HistoryTurn`, `ConnectRequest`, `AuthRequest`, `RefreshRequest` | Request shapes. History is limited to 50 turns. |
 
 **`chat()` in detail:**
@@ -154,9 +141,10 @@ The thin layer: validate the input, call a service, return JSON or a stream. No 
 2. **Before streaming**, resolves everything that can fail: the session's connection (409 if not
    connected) and the chosen model (400 if not allowed). Once a stream starts, the HTTP status is
    already 200, so errors found before that point get proper status codes.
-3. Builds an `AgentContext` and returns
-   `Response(stream_with_context(stream()), mimetype="text/event-stream")`.
-   `stream()` iterates `orchestrator.run(ctx)` and converts each `(event, data)` into SSE text.
+3. Builds an `AgentContext` and returns `StreamingResponse(stream_events(ctx), media_type="text/event-stream")`.
+   **`stream_events`** runs `orchestrator.run(ctx)` on a thread of its own, because the agents block on
+   LLM and DB calls. Events reach the async generator through a queue and become SSE text. If the client
+   disconnects, a stop flag ends the run at its next event, so no more LLM calls are paid for.
 4. Headers `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` stop proxies from
    buffering the stream.
 
@@ -169,7 +157,7 @@ from `data/demo.db`, the data users ask questions about, and gitignored. Full ex
 
 | File | Important functions | What it does and why |
 |---|---|---|
-| `store.py` | `UserStore` | Creates three tables on start: `users`, `refresh_tokens`, `login_events`. Opens one short-lived `sqlite3` connection per operation, which is safe across gunicorn threads. |
+| `store.py` | `UserStore` | Creates three tables on start: `users`, `refresh_tokens`, `login_events`. Opens one short-lived `sqlite3` connection per operation, which is safe across server threads. |
 | | `create`, `get_by_email`, `get_by_id` | Account rows. A unique email is enforced by the database (`UNIQUE` → `IntegrityError` → 409). |
 | | `record_login` | Writes every attempt (success or failure, IP, browser) to `login_events` and updates `last_login_at` / `login_count`. This is the login tracking. |
 | | `add_refresh_token`, `use_refresh_token` | Each refresh token is stored by its id (`jti`). `use_refresh_token` revokes it in one atomic `UPDATE … WHERE revoked = 0`, so it works exactly once. |

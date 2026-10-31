@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     engine_cache_size: int = 64
     rate_limit: str = "30/minute"
     rate_limit_storage_uri: str = "memory://"
-    proxy_fix_hops: int = 0  # set to 1 behind nginx / a load balancer
+    proxy_fix_hops: int = 0  # proxies in front of the app: 1 behind nginx or Render (for real client IPs)
     max_message_chars: int = 4000
 
     @field_validator(

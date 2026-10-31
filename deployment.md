@@ -2,7 +2,7 @@
 
 This guide covers two things:
 
-1. **Deploying:** the backend (Flask) on **Render** and the frontend (React) on **Vercel**.
+1. **Deploying:** the backend (FastAPI) on **Render** and the frontend (React) on **Vercel**.
 2. **How it works:** how the agents learn a database's schema, find the right data, build charts and
    stream Markdown answers, plus the full text of every prompt the agents use.
 
@@ -15,7 +15,7 @@ This guide covers two things:
 ```
  Browser ──HTTPS──▶  Vercel (frontend/)          static React build
     │
-    └──────HTTPS──▶  Render (repo root)          Flask + gunicorn, streams answers (SSE)
+    └──────HTTPS──▶  Render (repo root)          FastAPI + uvicorn, streams answers (SSE)
                         ├──▶ Nebius / Gemini / OpenAI   (LLM APIs)
                         ├──▶ user's PostgreSQL / MySQL   (read-only)
                         └──▶ Render Key Value (Redis)    optional, for multiple workers
@@ -42,6 +42,10 @@ The browser calls the Render backend **directly**, so two settings must point at
 
 ### 1.3 Deploy the backend on Render
 
+> **Shortcut:** the repo includes `render.yaml`. Choose **New + → Blueprint**, pick the repo, and paste
+> the secrets when asked (`SECRET_KEY`, `CORS_ORIGINS` and the API keys). That sets up everything in steps
+> 1–3 below. A Blueprint can't be used to update a service you already created by hand.
+
 1. Render dashboard → **New +** → **Web Service** → connect your GitHub repo.
 2. Fill in:
 
@@ -52,12 +56,16 @@ The browser calls the Render backend **directly**, so two settings must point at
    | Branch | `main` |
    | Root Directory | *(leave empty: the backend is at the repo root)* |
    | Build Command | `pip install -r requirements.txt` |
-   | Start Command | `gunicorn -c gunicorn.conf.py wsgi:app` |
+   | Start Command | `uvicorn asgi:app --host 0.0.0.0 --port $PORT` |
    | Health Check Path | `/api/health` (under **Advanced**) |
    | Instance type | Free works for demos; Starter avoids cold starts |
 
-   `gunicorn.conf.py` already listens on Render's `$PORT` and uses threaded workers, which suit
-   streamed answers.
+   `$PORT` is the port Render gives the app. Uvicorn also reads `WEB_CONCURRENCY` to decide how many
+   worker processes to start.
+
+   > **Already deployed on the old Flask version?** Open your service → **Settings → Build & Deploy →
+   > Start Command**, and paste the command above **before you push**. Otherwise the deploy fails,
+   > because `wsgi.py` and gunicorn no longer exist.
 
 3. **Environment variables** (Environment tab → Add). Copy the values from your local `.env`:
 
@@ -122,10 +130,10 @@ The browser calls the Render backend **directly**, so two settings must point at
 
 Each user's database connection is kept in a **session store**:
 
-- **Memory (default):** each gunicorn worker process has its own memory. With 2+ workers, a
+- **Memory (default):** each uvicorn worker process has its own memory. With 2+ workers, a
   user might connect on worker A and then chat on worker B, and get *"not connected"*. That's why
-  `WEB_CONCURRENCY=1`. One process with 8 threads (`GUNICORN_THREADS`) still serves several users at
-  once, which is enough for a demo or internship project.
+  `WEB_CONCURRENCY=1`. One process still serves several users at
+  once, because blocking work runs on threads, which is enough for a demo or internship project.
 - **Redis (to scale):** create a Render **Key Value** instance (Redis-compatible) in the same
   region, copy its *Internal URL*, then set:
 
